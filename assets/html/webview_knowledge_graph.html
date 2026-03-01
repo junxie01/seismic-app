@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学者信息</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #graph-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        .node {
+            cursor: pointer;
+        }
+        .node text {
+            font-size: 14px;
+            fill: white;
+            text-anchor: middle;
+            pointer-events: none;
+            font-weight: bold;
+        }
+        .link {
+            stroke-opacity: 0.8;
+        }
+        .tooltip {
+            position: absolute;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            border-radius: 5px;
+            pointer-events: none;
+            font-size: 12px;
+            z-index: 10;
+        }
+        .detail-card {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            color: #333;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            max-width: 80%;
+            max-height: 80%;
+            overflow-y: auto;
+            z-index: 100;
+        }
+        .detail-card h3 {
+            margin-top: 0;
+            color: #007AFF;
+        }
+        .detail-card .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #999;
+        }
+        .detail-card .close-btn:hover {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="graph-container"></div>
+    <div class="tooltip" id="tooltip" style="display: none;"></div>
+    <div class="detail-card" id="detail-card" style="display: none;">
+        <button class="close-btn" onclick="closeDetailCard()">&times;</button>
+        <h3 id="detail-title"></h3>
+        <div id="detail-content"></div>
+    </div>
+
+    <script>
+        // 全局变量
+        let svg, simulation, nodes, links;
+        let width = window.innerWidth;
+        let height = window.innerHeight;
+        let graphData = null;
+
+        // 初始化图谱
+        function initGraph(data) {
+            graphData = data;
+            
+            // 清除旧的图谱
+            d3.select("#graph-container").selectAll("*").remove();
+            
+            // 创建SVG
+            svg = d3.select("#graph-container")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .call(d3.zoom().on("zoom", function(event) {
+                    svg.selectAll("g").attr("transform", event.transform);
+                }));
+
+            // 创建一个分组元素
+            const g = svg.append("g");
+
+            // 颜色比例尺
+            const color = d3.scaleOrdinal()
+                .domain(["event", "person", "place", "central", "scientist", "term", "country"])
+                .range(["#FF3B30", "#FF9500", "#34C759", "#007AFF", "#9C27B0", "#34C759", "#5856D6"]);
+
+            // 过滤链接，只保留教师-学生关系
+            const filteredLinks = data.links.filter(link => 
+                link.type === 'teacher-student'
+            );
+
+            // 创建力导向模拟
+            simulation = d3.forceSimulation(data.nodes)
+                .force("link", d3.forceLink(filteredLinks).id(d => d.id).distance(100))
+                .force("charge", d3.forceManyBody().strength(-500))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collision", d3.forceCollide().radius(d => (d.radius || 20) + 10));
+
+            // 创建连接线
+            links = g.append("g")
+                .selectAll("line")
+                .data(filteredLinks)
+                .enter().append("line")
+                .attr("class", "link")
+                .attr("stroke", d => d.color || "#999")
+                .attr("stroke-width", d => Math.sqrt(d.weight || 1) * 2);
+
+            // 创建节点
+            nodes = g.append("g")
+                .selectAll(".node")
+                .data(data.nodes)
+                .enter().append("g")
+                .attr("class", "node")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            // 添加节点图形
+            nodes.each(function(d) {
+                const nodeGroup = d3.select(this);
+                const radius = d.radius || 20;
+                
+                // 先添加背景圆圈
+                nodeGroup.append("circle")
+                    .attr("r", radius)
+                    .attr("fill", d => color(d.type || "default"))
+                    .on("click", showNodeDetail)
+                    .on("mouseover", function(event, d) {
+                        showTooltip(event, d);
+                        d3.select(this).attr("stroke", "white").attr("stroke-width", 2);
+                    })
+                    .on("mouseout", function(event, d) {
+                        hideTooltip();
+                        d3.select(this).attr("stroke", null);
+                    });
+            });
+
+            // 添加节点文本
+            nodes.append("text")
+                .text(d => d.name)
+                .attr("dy", 5)
+                .attr("font-size", d => Math.max(12, (d.radius || 20) * 0.5) + "px")
+                .attr("fill", "white")
+                .attr("text-anchor", "middle");
+
+            // 更新模拟
+            simulation.on("tick", ticked);
+        }
+
+        // 更新函数
+        function ticked() {
+            links
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y);
+
+            nodes
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+        }
+
+        // 拖拽开始
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        // 拖拽中
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        // 拖拽结束
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        // 显示节点详情
+        function showNodeDetail(event, d) {
+            const detailCard = document.getElementById('detail-card');
+            const detailTitle = document.getElementById('detail-title');
+            const detailContent = document.getElementById('detail-content');
+
+            detailTitle.textContent = d.name;
+            
+            let content = `<p><strong>类型:</strong> ${d.type || '未知'}</p>`;
+            
+            if (d.description) {
+                content += `<p><strong>描述:</strong> ${d.description}</p>`;
+            }
+            
+            if (d.institution) {
+                content += `<p><strong>所属单位:</strong> ${d.institution}</p>`;
+            }
+            
+            if (d.metadata) {
+                if (d.type === 'scientist' || d.type === 'person') {
+                    // 学者详情
+                    content += `<div style="margin-top: 15px;"><strong>学术档案:</strong></div>`;
+                    if (d.metadata.field) content += `<p><strong>研究领域:</strong> ${d.metadata.field}</p>`;
+                    if (d.metadata.supervisors) {
+                        content += `<p><strong>导师:</strong> ${d.metadata.supervisors.join(', ')}</p>`;
+                    }
+                    if (d.metadata.students) {
+                        content += `<p><strong>学生:</strong> ${d.metadata.students.join(', ')}</p>`;
+                    }
+                }
+            }
+
+            detailContent.innerHTML = content;
+            detailCard.style.display = 'block';
+
+            // 发送消息到React Native
+            if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'nodeClick',
+                    data: d
+                }));
+            }
+        }
+
+        // 关闭详情卡片
+        function closeDetailCard() {
+            document.getElementById('detail-card').style.display = 'none';
+        }
+
+        // 获取节点ID
+        function getNodeId(node) {
+            return typeof node === 'object' ? node.id : node;
+        }
+
+        // 高亮三代学者关系
+        function highlightTeacherStudentChain(nodeId) {
+            // 重置所有节点和连接的样式
+            resetHighlights();
+            
+            // 查找目标节点
+            const targetNode = graphData.nodes.find(n => n.id === nodeId);
+            if (!targetNode) return;
+            
+            // 收集三代师承节点
+            const teacherStudentNodes = new Set([nodeId]);
+            const teacherStudentLinks = new Set();
+            
+            // 第一代：目标节点的学生
+            graphData.links.forEach(link => {
+                const sourceId = getNodeId(link.source);
+                const targetId = getNodeId(link.target);
+                if (sourceId === nodeId && link.type === 'teacher-student') {
+                    teacherStudentNodes.add(targetId);
+                    teacherStudentLinks.add(`${sourceId}-${targetId}`);
+                    
+                    // 第二代：学生的学生
+                    graphData.links.forEach(link2 => {
+                        const sourceId2 = getNodeId(link2.source);
+                        const targetId2 = getNodeId(link2.target);
+                        if (sourceId2 === targetId && link2.type === 'teacher-student') {
+                            teacherStudentNodes.add(targetId2);
+                            teacherStudentLinks.add(`${sourceId2}-${targetId2}`);
+                        }
+                    });
+                }
+            });
+            
+            // 第一代：目标节点的导师
+            graphData.links.forEach(link => {
+                const sourceId = getNodeId(link.source);
+                const targetId = getNodeId(link.target);
+                if (targetId === nodeId && link.type === 'teacher-student') {
+                    teacherStudentNodes.add(sourceId);
+                    teacherStudentLinks.add(`${sourceId}-${targetId}`);
+                    
+                    // 第二代：导师的导师
+                    graphData.links.forEach(link2 => {
+                        const sourceId2 = getNodeId(link2.source);
+                        const targetId2 = getNodeId(link2.target);
+                        if (targetId2 === sourceId && link2.type === 'teacher-student') {
+                            teacherStudentNodes.add(sourceId2);
+                            teacherStudentLinks.add(`${sourceId2}-${targetId2}`);
+                        }
+                    });
+                }
+            });
+            
+            // 高亮节点
+            nodes.selectAll('circle')
+                .attr('stroke', function(d) {
+                    return teacherStudentNodes.has(d.id) ? 'yellow' : null;
+                })
+                .attr('stroke-width', function(d) {
+                    return teacherStudentNodes.has(d.id) ? 4 : 0;
+                });
+            
+            // 高亮连接
+            links.attr('stroke', function(d) {
+                const sourceId = getNodeId(d.source);
+                const targetId = getNodeId(d.target);
+                const linkId = `${sourceId}-${targetId}`;
+                return teacherStudentLinks.has(linkId) ? 'yellow' : d.color || '#999';
+            }).attr('stroke-width', function(d) {
+                const sourceId = getNodeId(d.source);
+                const targetId = getNodeId(d.target);
+                const linkId = `${sourceId}-${targetId}`;
+                return teacherStudentLinks.has(linkId) ? Math.sqrt(d.weight || 1) * 3 : Math.sqrt(d.weight || 1) * 2;
+            });
+        }
+
+        // 重置高亮
+        function resetHighlights() {
+            // 重置节点样式
+            nodes.selectAll('circle')
+                .attr('stroke', null)
+                .attr('stroke-width', 0);
+            
+            // 重置连接样式
+            links.attr('stroke', function(d) {
+                return d.color || '#999';
+            }).attr('stroke-width', function(d) {
+                return Math.sqrt(d.weight || 1) * 2;
+            });
+        }
+
+        // 显示工具提示
+        function showTooltip(event, d) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.innerHTML = `<strong>${d.name}</strong><br>类型: ${d.type || '未知'}`;
+            tooltip.style.display = 'block';
+            tooltip.style.left = (event.pageX + 10) + 'px';
+            tooltip.style.top = (event.pageY - 28) + 'px';
+        }
+
+        // 隐藏工具提示
+        function hideTooltip() {
+            document.getElementById('tooltip').style.display = 'none';
+        }
+
+        // 处理窗口大小变化
+        window.addEventListener('resize', function() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            
+            svg.attr('width', width)
+               .attr('height', height);
+            
+            simulation.force('center', d3.forceCenter(width / 2, height / 2));
+            simulation.alpha(0.3).restart();
+        });
+
+        // 接收来自React Native的消息
+        window.addEventListener('message', function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'initGraph') {
+                    initGraph(data.graphData);
+                } else if (data.type === 'updateGraph') {
+                    initGraph(data.graphData);
+                }
+            } catch (error) {
+                console.error('Error parsing message:', error);
+            }
+        });
+    </script>
+</body>
+</html>

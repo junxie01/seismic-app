@@ -1,0 +1,183 @@
+<!DOCTYPE html> 
+<html lang="zh-CN"> 
+<head> 
+    <meta charset="UTF-8"> 
+    <title>地震学关系网络图谱</title> 
+    <script src="https://d3js.org/d3.v6.min.js"></script> 
+    <style> 
+        body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: Arial, sans-serif; 
+            background-color: #000; 
+        } 
+        .node { 
+            stroke: #fff; 
+            stroke-width: 1.5px; 
+        } 
+        .link { 
+            stroke: #999; 
+            stroke-opacity: .6; 
+        } 
+        .label { 
+            fill: #fff; 
+            font-size: 10px; 
+            pointer-events: none; 
+        } 
+        .tooltip { 
+            position: absolute; 
+            background-color: rgba(0, 0, 0, 0.8); 
+            color: white; 
+            padding: 10px; 
+            border-radius: 5px; 
+            font-size: 12px; 
+            pointer-events: none; 
+            z-index: 10; 
+        } 
+    </style> 
+</head> 
+<body> 
+<svg width="100%" height="100%" viewBox="0 0 1000 800"></svg> 
+<script> 
+    // 设置SVG画布的尺寸 
+    const width = 1000, height = 800; 
+
+    // 创建一个模拟器 
+    const simulation = d3.forceSimulation() 
+        .force("link", d3.forceLink().id(d => d.id).distance(100)) 
+        .force("charge", d3.forceManyBody().strength(-300)) 
+        .force("center", d3.forceCenter(width / 2, height / 2)); 
+
+    // 加载数据并绘制图形 
+    const svg = d3.select("svg"); 
+    const tooltip = d3.select("body").append("div").attr("class", "tooltip").style("opacity", 0); 
+
+    // 定义图中的节点和链接的数据 - 科学家示例：查尔斯·里克特 
+    const graph = { 
+        "nodes": [ 
+            {"id": "查尔斯·里克特", "group": 1, "type": "scientist", "info": "地震学家，创立里克特震级"}, 
+            {"id": "加州理工学院", "group": 2, "type": "affiliation", "info": "工作单位"}, 
+            {"id": "宾诺·古登堡", "group": 3, "type": "scientist", "info": "导师，地震学家"}, 
+            {"id": "布鲁斯·博尔特", "group": 4, "type": "scientist", "info": "学生，地震学家"}, 
+            {"id": "地震学", "group": 5, "type": "field", "info": "研究领域"}, 
+            {"id": "震级测定", "group": 6, "type": "field", "info": "研究领域"}, 
+            {"id": "里克特震级", "group": 7, "type": "achievement", "info": "主要成就"}, 
+            {"id": "古腾堡-里克特定律", "group": 8, "type": "achievement", "info": "合作成就"}, 
+            {"id": "震级标度", "group": 9, "type": "paper", "info": "主要论文"}, 
+            {"id": "地震能量", "group": 10, "type": "paper", "info": "主要论文"} 
+        ], 
+        "links": [ 
+            {"source": "查尔斯·里克特", "target": "加州理工学院", "value": 5}, 
+            {"source": "查尔斯·里克特", "target": "宾诺·古登堡", "value": 3}, 
+            {"source": "布鲁斯·博尔特", "target": "查尔斯·里克特", "value": 3}, 
+            {"source": "查尔斯·里克特", "target": "地震学", "value": 4}, 
+            {"source": "查尔斯·里克特", "target": "震级测定", "value": 4}, 
+            {"source": "查尔斯·里克特", "target": "里克特震级", "value": 5}, 
+            {"source": "查尔斯·里克特", "target": "古腾堡-里克特定律", "value": 4}, 
+            {"source": "查尔斯·里克特", "target": "震级标度", "value": 3}, 
+            {"source": "查尔斯·里克特", "target": "地震能量", "value": 3} 
+        ] 
+    }; 
+
+    // 根据节点类型设置颜色 
+    const colorMap = { 
+        scientist: "#FF6B6B", 
+        affiliation: "#4ECDC4", 
+        field: "#45B7D1", 
+        achievement: "#FF9500", 
+        paper: "#96CEB4" 
+    }; 
+
+    // 绘制链接 
+    const link = svg.append("g") 
+        .attr("class", "links") 
+        .selectAll("line") 
+        .data(graph.links) 
+        .enter().append("line") 
+        .attr("class", "link") 
+        .attr("stroke-width", d => Math.sqrt(d.value)); 
+
+    // 绘制节点 
+    const node = svg.append("g") 
+        .attr("class", "nodes") 
+        .selectAll("circle") 
+        .data(graph.nodes) 
+        .enter().append("circle") 
+        .attr("class", "node") 
+        .attr("r", d => d.type === "scientist" ? 15 : 10) 
+        .attr("fill", d => colorMap[d.type] || "#95A5A6") 
+        .call(d3.drag() 
+            .on("start", dragstarted) 
+            .on("drag", dragged) 
+            .on("end", dragended)); 
+
+    // 添加文字标签到节点上 
+    const label = svg.append("g") 
+        .attr("class", "labels") 
+        .selectAll("text") 
+        .data(graph.nodes) 
+        .enter().append("text") 
+        .attr("class", "label") 
+        .text(d => d.id) 
+        .attr("fill", "#fff") 
+        .attr("font-size", "10px") 
+        .attr("dx", 15) 
+        .attr("dy", 4); 
+
+    // 添加节点悬停提示 
+    node.on("mouseover", function(event, d) { 
+        tooltip.transition() 
+            .duration(200) 
+            .style("opacity", .9); 
+        tooltip.html(d.id + "<br/>" + d.info) 
+            .style("left", (event.pageX + 10) + "px") 
+            .style("top", (event.pageY - 28) + "px"); 
+    }) 
+    .on("mouseout", function() { 
+        tooltip.transition() 
+            .duration(500) 
+            .style("opacity", 0); 
+    }); 
+
+    // 拖动功能 
+    function dragstarted(event, d) { 
+        if (!event.active) simulation.alphaTarget(0.3).restart(); 
+        d.fx = d.x; 
+        d.fy = d.y; 
+    } 
+    
+    function dragged(event, d) { 
+        d.fx = event.x; 
+        d.fy = event.y; 
+    } 
+    
+    function dragended(event, d) { 
+        if (!event.active) simulation.alphaTarget(0); 
+        d.fx = null; 
+        d.fy = null; 
+    } 
+
+    // 更新位置 
+    simulation 
+        .nodes(graph.nodes) 
+        .on("tick", () => { 
+            link 
+                .attr("x1", d => d.source.x) 
+                .attr("y1", d => d.source.y) 
+                .attr("x2", d => d.target.x) 
+                .attr("y2", d => d.target.y); 
+
+            node 
+                .attr("cx", d => d.x) 
+                .attr("cy", d => d.y); 
+
+            label 
+                .attr("x", d => d.x) 
+                .attr("y", d => d.y); 
+        }); 
+
+    simulation.force("link") 
+        .links(graph.links); 
+</script> 
+</body> 
+</html>
