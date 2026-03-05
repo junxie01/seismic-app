@@ -14,12 +14,12 @@ import { mockScholars } from '../constants/mockData';
 import ScholarGraph from '../components/ScholarGraph';
 
 const KnowledgeScreen = () => {
-  const [viewMode, setViewMode] = useState('graph');
   const [searchQuery, setSearchQuery] = useState('');
   const [scholars, setScholars] = useState([]);
   const [showEditModal, setShowEditModal] = useState(false);
   const [currentScholar, setCurrentScholar] = useState(null);
   const [expandedScholarId, setExpandedScholarId] = useState(null);
+  const [selectedScholarId, setSelectedScholarId] = useState(null);
   const [editForm, setEditForm] = useState({
     name: '',
     affiliation: '',
@@ -126,45 +126,51 @@ const KnowledgeScreen = () => {
     });
   };
 
+  const handleScholarPress = (scholarId) => {
+    if (selectedScholarId === scholarId) {
+      setSelectedScholarId(null);
+    } else {
+      setSelectedScholarId(scholarId);
+      setExpandedScholarId(null);
+    }
+  };
+
   return (
     <View style={styles.container}>
       
-      <View style={styles.viewToggle}>
-        <TouchableOpacity
-          style={[styles.viewButton, styles.selectedViewButton]}
-          onPress={() => setViewMode(viewMode === 'graph' ? 'list' : 'graph')}
-        >
-          <Ionicons name={viewMode === 'graph' ? "list-outline" : "grid-outline"} size={16} color="white" />
-          <Text style={styles.selectedViewButtonText}>{viewMode === 'graph' ? '列表' : '图谱'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.viewButton} onPress={handleAddScholar}>
-          <Ionicons name="person-add-outline" size={16} color="#666" />
-          <Text style={styles.viewButtonText}>添加学者</Text>
+      <View style={styles.searchContainer}>
+        <Ionicons name="search-outline" size={20} color="#999" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="输入学者姓名进行搜索"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        <TouchableOpacity style={styles.addButton} onPress={handleAddScholar}>
+          <Ionicons name="add" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
-
-      {viewMode === 'list' && (
-        <View style={styles.searchContainer}>
-          <Ionicons name="search-outline" size={20} color="#999" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="输入学者姓名进行搜索"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          <Ionicons name="search" size={28} color="#992683" style={styles.searchActionIcon} />
-        </View>
-      )}
 
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
           <Text style={styles.loadingText}>加载学者数据...</Text>
         </View>
-      ) : viewMode === 'graph' ? (
+      ) : selectedScholarId ? (
         <View style={styles.graphContainer}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => setSelectedScholarId(null)}
+          >
+            <Ionicons name="arrow-back" size={24} color="white" />
+            <Text style={styles.backButtonText}>返回列表</Text>
+          </TouchableOpacity>
           <Text style={styles.graphTitle}>学者关系图谱</Text>
-          <ScholarGraph scholars={scholars} onEditScholar={handleEditPress} />
+          <ScholarGraph 
+            scholars={scholars} 
+            selectedScholarId={selectedScholarId}
+            onEditScholar={handleEditPress} 
+          />
         </View>
       ) : (
         <ScrollView style={styles.scholarList}>
@@ -176,7 +182,7 @@ const KnowledgeScreen = () => {
             <TouchableOpacity 
               key={scholar.id} 
               style={styles.scholarCard}
-              onPress={() => setExpandedScholarId(expandedScholarId === scholar.id ? null : scholar.id)}
+              onPress={() => handleScholarPress(scholar.id)}
               activeOpacity={0.7}
             >
               <View style={styles.scholarHeader}>
@@ -203,37 +209,8 @@ const KnowledgeScreen = () => {
                   >
                     <Ionicons name="trash-outline" size={24} color="#FF3B30" />
                   </TouchableOpacity>
-                  <Ionicons 
-                    name={expandedScholarId === scholar.id ? "chevron-up" : "chevron-down"} 
-                    size={24} 
-                    color="#999" 
-                  />
                 </View>
               </View>
-              
-              {expandedScholarId === scholar.id && (
-                <View style={styles.scholarDetailsContainer}>
-                  <View style={styles.scholarStats}>
-                    <View style={styles.statItem}>
-                      <Text style={styles.statValue}>{scholar.papers}</Text>
-                      <Text style={styles.statLabel}>论文</Text>
-                    </View>
-                    <View style={styles.statItem}>
-                      <Text style={styles.statValue}>{scholar.citations}</Text>
-                      <Text style={styles.statLabel}>引用</Text>
-                    </View>
-                  </View>
-                  
-                  <Text style={styles.scholarBio}>{scholar.bio}</Text>
-                  
-                  <View style={styles.scholarDetails}>
-                    <Text style={styles.scholarDetail}>研究方向: {scholar.research}</Text>
-                    <Text style={styles.scholarDetail}>所属机构: {scholar.affiliation}</Text>
-                    {scholar.advisor && <Text style={styles.scholarDetail}>导师: {scholar.advisor}</Text>}
-                    {scholar.students && <Text style={styles.scholarDetail}>弟子: {scholar.students}</Text>}
-                  </View>
-                </View>
-              )}
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -403,8 +380,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 15,
   },
-  searchActionIcon: {
+  addButton: {
     marginLeft: 12,
+    padding: 8,
   },
   loadingContainer: {
     flex: 1,
@@ -429,6 +407,24 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 20,
     marginBottom: 30,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'absolute',
+    top: 20,
+    left: 20,
+    zIndex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  backButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
   },
   scholarNetwork: {
     flex: 1,

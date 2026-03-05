@@ -1,12 +1,31 @@
-import React, { useRef, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, PanResponder, TouchableOpacity } from 'react-native';
-import Svg, { Line, Circle, Text as SvgText, G } from 'react-native-svg';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
+import { View, Text, StyleSheet, PanResponder, TouchableOpacity, Dimensions } from 'react-native';
+import Svg, { Line, Circle, Text as SvgText, G, Image } from 'react-native-svg';
 
-// 获取屏幕尺寸并确保它们是数字
-const screenWidth = 375;
-const screenHeight = 667;
+// 获取屏幕尺寸
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-const ScholarGraph = ({ scholars, onEditScholar }) => {
+// 定义关系类型和对应的颜色
+const relationshipColors = {
+  advisor: '#992683', // 导师关系
+  student: '#007AFF', // 学生关系
+  colleague: '#34C759', // 同事关系
+  other: '#FF9500', // 其他关系
+};
+
+// 定义节点类型和对应的颜色
+const nodeTypes = {
+  central: '#FF3B30', // 中心节点
+  institution: '#992683', // 机构节点
+  research: '#007AFF', // 研究方向节点
+  papers: '#34C759', // 论文节点
+  impact: '#FF9500', // 影响节点
+  relationship: '#FFCC00', // 关系节点
+  career: '#5856D6', // 事业节点
+  other: '#8E8E93', // 其他节点
+};
+
+const ScholarGraph = ({ scholars, selectedScholarId, onEditScholar }) => {
   if (!scholars || scholars.length === 0) {
     return (
       <View style={styles.container}>
@@ -20,59 +39,137 @@ const ScholarGraph = ({ scholars, onEditScholar }) => {
   const [translateX, setTranslateX] = useState(0);
   const [translateY, setTranslateY] = useState(0);
   const [selectedScholar, setSelectedScholar] = useState(null);
+  const [nodePositions, setNodePositions] = useState([]);
   const lastScale = useRef(1);
   const lastTranslateX = useRef(0);
   const lastTranslateY = useRef(0);
 
-  // 计算节点位置
-  const nodePositions = useMemo(() => {
-    const positions = [];
-    const centerX = screenWidth / 2;
-    const centerY = screenHeight / 2;
-    const baseRadius = Math.min(screenWidth, screenHeight) * 0.35;
+  // 计算节点位置 - 参考用户提供的图片，使用同心圆布局
+  useEffect(() => {
+    const calculateNodePositions = () => {
+      const positions = [];
+      const centerX = screenWidth / 2;
+      const centerY = screenHeight / 2;
+      
+      // 定义不同层级的半径
+      const radii = [0, 150, 250];
+      
+      // 创建节点位置映射
+      const positionMap = new Map();
+      
+      // 找到选中学者，如果没有选中则使用第一个学者
+      let centerScholar;
+      if (selectedScholarId) {
+        centerScholar = scholars.find(scholar => scholar.id === selectedScholarId);
+      }
+      if (!centerScholar) {
+        centerScholar = scholars[0];
+      }
+      
+      // 首先放置中心节点（学者本人）
+      positionMap.set(centerScholar.id, { 
+        x: centerX, 
+        y: centerY, 
+        scholar: centerScholar,
+        type: 'central'
+      });
+      positions.push({ 
+        x: centerX, 
+        y: centerY, 
+        scholar: centerScholar,
+        type: 'central'
+      });
 
-    scholars.forEach((scholar, index) => {
-      // 添加随机偏移，使排布不那么规律
-      const randomAngle = (index / scholars.length) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
-      const randomRadius = baseRadius * (0.8 + Math.random() * 0.4);
-      const x = centerX + randomRadius * Math.cos(randomAngle);
-      const y = centerY + randomRadius * Math.sin(randomAngle);
-      positions.push({ x, y, scholar });
-    });
+      // 定义图谱类型和对应的信息
+      const graphTypes = [
+        { type: 'institution', label: '机构', value: centerScholar.affiliation, angleStart: -Math.PI/2 - Math.PI/4, angleEnd: -Math.PI/2 + Math.PI/4 },
+        { type: 'research', label: '研究方向', value: centerScholar.research, angleStart: -Math.PI/4, angleEnd: Math.PI/4 },
+        { type: 'papers', label: '论文', value: centerScholar.papers, angleStart: Math.PI/2 - Math.PI/4, angleEnd: Math.PI/2 + Math.PI/4 },
+        { type: 'impact', label: '影响', value: centerScholar.citations, angleStart: Math.PI - Math.PI/4, angleEnd: Math.PI + Math.PI/4 },
+        { type: 'relationship', label: '关系', value: centerScholar.advisor || '无', angleStart: -Math.PI/2 - Math.PI/2, angleEnd: -Math.PI/2 },
+        { type: 'career', label: '事业', value: '成就', angleStart: Math.PI/2, angleEnd: Math.PI/2 + Math.PI/2 },
+        { type: 'other', label: '其他', value: '信息', angleStart: -Math.PI/4 - Math.PI/2, angleEnd: -Math.PI/4 },
+      ];
+      
+      // 放置不同类型的节点
+      graphTypes.forEach((graphType, index) => {
+        if (graphType.value) {
+          const angle = graphType.angleStart + (graphType.angleEnd - graphType.angleStart) / 2;
+          const radius = radii[1];
+          const x = centerX + radius * Math.cos(angle);
+          const y = centerY + radius * Math.sin(angle);
+          
+          // 创建一个临时节点对象
+          const node = {
+            id: `${centerScholar.id}-${graphType.type}`,
+            name: graphType.label,
+            value: graphType.value,
+            type: graphType.type
+          };
+          
+          positionMap.set(node.id, { x, y, scholar: node, type: graphType.type });
+          positions.push({ x, y, scholar: node, type: graphType.type });
+        }
+      });
 
-    return positions;
-  }, [scholars]);
+      // 为相关学者计算位置
+      const relatedScholars = scholars.filter(scholar => 
+        scholar.id !== centerScholar.id && 
+        (scholar.advisor === centerScholar.name || 
+         (centerScholar.students && typeof centerScholar.students === 'string' && centerScholar.students.includes(scholar.name)) ||
+         scholar.affiliation === centerScholar.affiliation)
+      );
+      
+      // 放置相关学者节点
+      relatedScholars.forEach((scholar, index) => {
+        const angle = (index / relatedScholars.length) * Math.PI * 2;
+        const radius = radii[2];
+        const x = centerX + radius * Math.cos(angle);
+        const y = centerY + radius * Math.sin(angle);
+        
+        // 确定节点类型
+        let type = 'other';
+        if (scholar.advisor && scholar.advisor === centerScholar.name) {
+          type = 'relationship';
+        } else if (centerScholar.students && typeof centerScholar.students === 'string' && centerScholar.students.includes(scholar.name)) {
+          type = 'relationship';
+        } else if (scholar.affiliation === centerScholar.affiliation) {
+          type = 'institution';
+        }
+        
+        positionMap.set(scholar.id, { x, y, scholar, type });
+        positions.push({ x, y, scholar, type });
+      });
+
+      return positions;
+    };
+
+    setNodePositions(calculateNodePositions());
+  }, [scholars, selectedScholarId]);
 
   // 生成连接线
   const connections = useMemo(() => {
     const connectionsArray = [];
     
-    // 只连接有师承关系的学者
-    for (let i = 0; i < nodePositions.length; i++) {
-      for (let j = 0; j < nodePositions.length; j++) {
-        if (i !== j) {
-          const scholarA = nodePositions[i].scholar;
-          const scholarB = nodePositions[j].scholar;
-          
-          // 检查是否存在师承关系
-          const hasAdvisorRelation = scholarA.advisor && scholarA.advisor === scholarB.name;
-          const hasStudentRelation = scholarA.students && (typeof scholarA.students === 'string' ? scholarA.students.includes(scholarB.name) : false);
-          
-          if (hasAdvisorRelation || hasStudentRelation) {
-            connectionsArray.push(
-              <Line
-                key={`${i}-${j}`}
-                x1={nodePositions[i].x}
-                y1={nodePositions[i].y}
-                x2={nodePositions[j].x}
-                y2={nodePositions[j].y}
-                stroke="rgba(153, 38, 131, 0.5)"
-                strokeWidth={2}
-              />
-            );
-          }
+    // 找到中心节点
+    const centerNode = nodePositions.find(node => node.type === 'central');
+    if (centerNode) {
+      // 连接中心节点与所有其他节点
+      nodePositions.forEach((node, index) => {
+        if (node.type !== 'central') {
+          connectionsArray.push(
+            <Line
+              key={`${centerNode.scholar.id}-${node.scholar.id}`}
+              x1={centerNode.x}
+              y1={centerNode.y}
+              x2={node.x}
+              y2={node.y}
+              stroke={nodeTypes[node.type] || nodeTypes.other}
+              strokeWidth={2}
+            />
+          );
         }
-      }
+      });
     }
 
     return connectionsArray;
@@ -91,23 +188,27 @@ const ScholarGraph = ({ scholars, onEditScholar }) => {
       onPanResponderMove: (_, gestureState) => {
         if (gestureState.numberActiveTouches === 2) {
           // 双指缩放
-          setScale(lastScale.current * gestureState.scale);
+          const newScale = lastScale.current * gestureState.scale;
+          // 限制缩放范围
+          if (newScale >= 0.5 && newScale <= 3) {
+            setScale(newScale);
+          }
         } else {
           // 单指移动
           setTranslateX(lastTranslateX.current + gestureState.dx);
           setTranslateY(lastTranslateY.current + gestureState.dy);
         }
       },
-      onPanResponderRelease: () => {
-        // 限制缩放范围
-        if (scale < 0.5) {
-          setScale(0.5);
-        } else if (scale > 3) {
-          setScale(3);
-        }
-      },
     })
   ).current;
+
+  // 获取节点颜色
+  const getNodeColor = (type, isSelected) => {
+    if (isSelected) {
+      return '#FF3B30';
+    }
+    return nodeTypes[type] || nodeTypes.other;
+  };
 
   return (
     <View style={styles.container} {...panResponder.panHandlers}>
@@ -128,44 +229,65 @@ const ScholarGraph = ({ scholars, onEditScholar }) => {
           {connections}
 
           {/* 渲染节点 */}
-          {nodePositions.map(({ x, y, scholar }, index) => (
-            <G key={`node-${scholar.id}`}>
-              <Circle
-                key={`circle-${scholar.id}`}
-                cx={x}
-                cy={y}
-                r="40"
-                fill={selectedScholar?.id === scholar.id ? "#FF3B30" : "#992683"}
-              />
-              <SvgText
-                key={`text-${scholar.id}`}
-                x={x}
-                y={y}
-                fontSize="10"
-                fontWeight="700"
-                fill="white"
-                textAnchor="middle"
-                alignmentBaseline="middle"
-              >
-                {scholar.name}
-              </SvgText>
-            </G>
-          ))}
+          {nodePositions.map(({ x, y, scholar, type }, index) => {
+            const isSelected = selectedScholar?.id === scholar.id;
+            const nodeColor = getNodeColor(type, isSelected);
+            
+            return (
+              <G key={`node-${scholar.id}`}>
+                <Circle
+                  key={`circle-${scholar.id}`}
+                  cx={x}
+                  cy={y}
+                  r={type === 'central' ? "40" : "30"}
+                  fill={nodeColor}
+                  stroke={isSelected ? "#FF3B30" : nodeColor}
+                  strokeWidth="2"
+                />
+                <SvgText
+                  key={`text-${scholar.id}`}
+                  x={x}
+                  y={y}
+                  fontSize={type === 'central' ? "12" : "8"}
+                  fontWeight="700"
+                  fill="white"
+                  textAnchor="middle"
+                  alignmentBaseline="middle"
+                >
+                  {scholar.name}
+                </SvgText>
+                {type !== 'central' && scholar.value && (
+                  <SvgText
+                    key={`value-${scholar.id}`}
+                    x={x}
+                    y={y + 12}
+                    fontSize="6"
+                    fontWeight="400"
+                    fill="white"
+                    textAnchor="middle"
+                    alignmentBaseline="middle"
+                  >
+                    {scholar.value}
+                  </SvgText>
+                )}
+              </G>
+            );
+          })}
         </G>
       </Svg>
       
       {/* 渲染可点击区域 */}
-      {nodePositions.map(({ x, y, scholar }, index) => (
+      {nodePositions.map(({ x, y, scholar, type }, index) => (
         <TouchableOpacity
           key={`touchable-${scholar.id}`}
           style={[
             styles.nodeTouchable,
             {
-              left: translateX + x * scale - 40 * scale,
-              top: translateY + y * scale - 40 * scale,
-              width: 80 * scale,
-              height: 80 * scale,
-              borderRadius: 40 * scale,
+              left: translateX + x * scale - (type === 'central' ? 40 : 30) * scale,
+              top: translateY + y * scale - (type === 'central' ? 40 : 30) * scale,
+              width: (type === 'central' ? 80 : 60) * scale,
+              height: (type === 'central' ? 80 : 60) * scale,
+              borderRadius: (type === 'central' ? 40 : 30) * scale,
             }
           ]}
           onPress={() => setSelectedScholar(selectedScholar?.id === scholar.id ? null : scholar)}
@@ -185,7 +307,7 @@ const ScholarGraph = ({ scholars, onEditScholar }) => {
               >
                 <Text style={styles.closeButtonText}>关闭</Text>
               </TouchableOpacity>
-              {onEditScholar && (
+              {onEditScholar && selectedScholar.type === 'central' && (
                 <TouchableOpacity 
                   style={styles.editButton} 
                   onPress={() => onEditScholar(selectedScholar)}
@@ -195,32 +317,41 @@ const ScholarGraph = ({ scholars, onEditScholar }) => {
               )}
             </View>
           </View>
-          <View style={styles.detailItem}>
-            <Text style={styles.detailLabel}>研究方向:</Text>
-            <Text style={styles.detailValue}>{selectedScholar.research}</Text>
-          </View>
-          <View style={styles.detailItem}>
-            <Text style={styles.detailLabel}>所属机构:</Text>
-            <Text style={styles.detailValue}>{selectedScholar.affiliation}</Text>
-          </View>
-          <View style={styles.detailItem}>
-            <Text style={styles.detailLabel}>论文数:</Text>
-            <Text style={styles.detailValue}>{selectedScholar.papers}</Text>
-          </View>
-          <View style={styles.detailItem}>
-            <Text style={styles.detailLabel}>引用数:</Text>
-            <Text style={styles.detailValue}>{selectedScholar.citations}</Text>
-          </View>
-          {selectedScholar.advisor && (
+          {selectedScholar.type === 'central' ? (
+            <>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>研究方向:</Text>
+                <Text style={styles.detailValue}>{selectedScholar.research}</Text>
+              </View>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>所属机构:</Text>
+                <Text style={styles.detailValue}>{selectedScholar.affiliation}</Text>
+              </View>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>论文数:</Text>
+                <Text style={styles.detailValue}>{selectedScholar.papers}</Text>
+              </View>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>引用数:</Text>
+                <Text style={styles.detailValue}>{selectedScholar.citations}</Text>
+              </View>
+              {selectedScholar.advisor && (
+                <View style={styles.detailItem}>
+                  <Text style={styles.detailLabel}>导师:</Text>
+                  <Text style={styles.detailValue}>{selectedScholar.advisor}</Text>
+                </View>
+              )}
+              {selectedScholar.students && (
+                <View style={styles.detailItem}>
+                  <Text style={styles.detailLabel}>弟子:</Text>
+                  <Text style={styles.detailValue}>{selectedScholar.students}</Text>
+                </View>
+              )}
+            </>
+          ) : (
             <View style={styles.detailItem}>
-              <Text style={styles.detailLabel}>导师:</Text>
-              <Text style={styles.detailValue}>{selectedScholar.advisor}</Text>
-            </View>
-          )}
-          {selectedScholar.students && (
-            <View style={styles.detailItem}>
-              <Text style={styles.detailLabel}>弟子:</Text>
-              <Text style={styles.detailValue}>{selectedScholar.students}</Text>
+              <Text style={styles.detailLabel}>{selectedScholar.name}:</Text>
+              <Text style={styles.detailValue}>{selectedScholar.value}</Text>
             </View>
           )}
         </View>
@@ -250,9 +381,6 @@ const styles = StyleSheet.create({
   },
   nodeTouchable: {
     position: 'absolute',
-    width: 100,
-    height: 100,
-    borderRadius: 50,
   },
   detailContainer: {
     position: 'absolute',
