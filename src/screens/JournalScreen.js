@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, ActivityIndicator, Alert, Modal
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, ActivityIndicator, Alert, Modal, Share, SafeAreaView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { initDatabase, storeJournalData, getJournalData } from '../utils/DatabaseManager';
@@ -120,6 +120,28 @@ const JournalScreen = () => {
     setLinkToOpen(null);
   };
 
+  // 分享论文
+  const handleShare = async (paper) => {
+    if (!paper) return;
+    
+    try {
+      const message = `【论文分享】${paper.title}\n\n作者: ${paper.authors}\n发布时间: ${paper.date}\n\nDOI: ${paper.doi}\n\n链接: ${paper.url}`;
+      
+      const result = await Share.share({
+        message: message,
+        url: paper.url,
+        title: paper.title
+      });
+      
+      if (result.action === Share.sharedAction) {
+        console.log('论文分享成功');
+      }
+    } catch (error) {
+      console.error('分享失败:', error);
+      Alert.alert('分享失败', '无法分享论文信息，请稍后重试');
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* 期刊标签栏 */}
@@ -178,24 +200,35 @@ const JournalScreen = () => {
       {/* 论文详情模态框 */}
       <Modal
         visible={showDetailModal}
-        transparent={true}
+        transparent={false}
         animationType="slide"
         onRequestClose={() => setShowDetailModal(false)}>
-        <View style={styles.modalContainer}>
+        <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity 
               onPress={() => setShowDetailModal(false)}
               style={styles.closeButton}>
-              <Ionicons name="close" size={24} color="#333" />
+              <Ionicons name="close" size={28} color="#333" />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>论文详情</Text>
-            <View style={styles.closeButton} />
+            <TouchableOpacity 
+              onPress={() => handleShare(selectedPaper)}
+              style={styles.closeButton}>
+              <Ionicons name="ellipsis-horizontal" size={28} color="#333" />
+            </TouchableOpacity>
           </View>
           
           {selectedPaper && (
-            <ScrollView style={styles.modalContent}>
+            <ScrollView 
+              style={styles.modalContent}
+              showsVerticalScrollIndicator={true}
+              contentContainerStyle={styles.modalContentContainer}
+              keyboardShouldPersistTaps="handled"
+              alwaysBounceVertical={true}>
               {/* 标题 */}
-              <Text style={styles.detailTitle}>{selectedPaper.title}</Text>
+              <View style={styles.titleContainer}>
+                <Text style={styles.detailTitle}>{selectedPaper.title}</Text>
+              </View>
               
               {/* 作者和日期 */}
               <View style={styles.detailMeta}>
@@ -256,10 +289,10 @@ const JournalScreen = () => {
                 <Text style={styles.linkAddress} numberOfLines={2}>{selectedPaper.url}</Text>
               </View>
 
-              <View style={{ height: 30 }} />
+              <View style={{ height: 50 }} />
             </ScrollView>
           )}
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* 链接确认模态框 */}
@@ -367,15 +400,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
     backgroundColor: '#F8F8FA',
-    paddingTop: 12
+    paddingTop: 20
   },
   closeButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  modalTitle: { fontSize: 18, fontWeight: '600', color: '#333' },
+  modalTitle: { fontSize: 18, fontWeight: '600', color: '#333', paddingTop: 4 },
   
-  modalContent: { flex: 1, padding: 16 },
+  modalContent: { flex: 1 },
+  modalContentContainer: { padding: 16 },
+  titleContainer: {
+    marginBottom: 24,
+    marginTop: 24
+  },
   
   // 详情样式
-  detailTitle: { fontSize: 18, fontWeight: 'bold', color: '#222', marginBottom: 16, lineHeight: 24 },
+  detailTitle: { fontSize: 18, fontWeight: 'bold', color: '#222', lineHeight: 24 },
   
   detailMeta: { marginBottom: 12 },
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },

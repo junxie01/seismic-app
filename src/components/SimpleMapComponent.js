@@ -1,30 +1,16 @@
 import React from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 const SimpleMapComponent = ({ style, earthquakes = [] }) => {
-  const mapData = earthquakes.map(e => {
-    try {
-      const place = e.properties.place || '未知位置';
-      const time = e.properties.time ? new Date(e.properties.time).toLocaleString() : '未知时间';
-      return {
-        lat: e.geometry.coordinates[1],
-        lng: e.geometry.coordinates[0],
-        mag: e.properties.mag || e.properties.magnitude || 0,
-        place: place.replace(/'/g, "\\'"),
-        time: time
-      };
-    } catch (err) {
-      console.error('Error mapping earthquake data:', err);
-      return {
-        lat: 0,
-        lng: 0,
-        mag: 0,
-        place: '数据错误',
-        time: '未知'
-      };
-    }
-  }).filter(item => !isNaN(item.lat) && !isNaN(item.lng));
+  // 转换地震数据为地图可读格式
+  const mapData = earthquakes.map(e => ({
+    lat: e.geometry.coordinates[1],
+    lng: e.geometry.coordinates[0],
+    mag: e.properties.mag || e.properties.magnitude || 0,
+    place: e.properties.place.replace(/'/g, "\\'"),
+    time: new Date(e.properties.time).toLocaleString()
+  }));
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -37,45 +23,30 @@ const SimpleMapComponent = ({ style, earthquakes = [] }) => {
       <style>
         body { margin: 0; padding: 0; background: #F2F2F7; }
         #map { height: 100vh; width: 100vw; }
+        .leaflet-popup-content-wrapper { border-radius: 10px; padding: 5px; }
       </style>
     </head>
     <body>
       <div id="map"></div>
       <script>
-        document.addEventListener('DOMContentLoaded', function() {
-          try {
-            const map = L.map('map', { 
-              zoomControl: true, 
-              attributionControl: false,
-              dragging: true,
-              touchZoom: true,
-              scrollWheelZoom: true
-            }).setView([20, 100], 3);
-            
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-              maxZoom: 19
+        window.onload = function() {
+          // 初始化全球地图
+          const map = L.map('map', { zoomControl: false, attributionControl: false }).setView([20, 100], 3);
+
+          // 使用完全免费的 OpenStreetMap
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+          const data = ${JSON.stringify(mapData)};
+          data.forEach(item => {
+            const color = item.mag >= 6.0 ? '#FF3B30' : (item.mag >= 5.0 ? '#FF9500' : '#34C759');
+            const marker = L.circleMarker([item.lat, item.lng], {
+              color: color, fillColor: color, fillOpacity: 0.5, weight: 1,
+              radius: Math.max(6, item.mag * 2.5)
             }).addTo(map);
-            
-            const data = ${JSON.stringify(mapData)};
-            if (data && data.length > 0) {
-              data.forEach(function(item) {
-                if (!isNaN(item.lat) && !isNaN(item.lng)) {
-                  const color = item.mag >= 6.0 ? '#FF3B30' : (item.mag >= 5.0 ? '#FF9500' : '#34C759');
-                  const marker = L.circleMarker([item.lat, item.lng], {
-                    color: color, 
-                    fillColor: color, 
-                    fillOpacity: 0.6, 
-                    weight: 1.5, 
-                    radius: Math.max(5, Math.min(20, item.mag * 2.5))
-                  }).bindPopup("<b>" + item.mag + " 级</b><br>" + item.place + "<br>" + item.time);
-                  marker.addTo(map);
-                }
-              });
-            }
-          } catch (e) {
-            console.error('Map initialization error:', e);
-          }
-        }, false);
+
+            marker.bindPopup("<b>" + item.mag + " 级地震</b><br>" + item.place + "<br><small>" + item.time + "</small>");
+          });
+        };
       </script>
     </body>
     </html>
@@ -89,25 +60,14 @@ const SimpleMapComponent = ({ style, earthquakes = [] }) => {
         style={styles.map}
         javaScriptEnabled={true}
         domStorageEnabled={true}
-        startInLoadingState={true}
-        scalesPageToFit={false}
-        scrollEnabled={true}
-        javaScriptEnabledAndroid={true}
-        mixedContentMode="always"
-        androidHardwareAccelerationDisabled={false}
-        onError={(syntheticEvent) => {
-          console.error('WebView error:', syntheticEvent.nativeEvent);
-        }}
-        onMessage={(event) => {
-          console.log('WebView message:', event.nativeEvent.data);
-        }}
+        androidHardwareAccelerationDisabled={false} // 启用硬件加速解决 Android 不渲染问题
       />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F2F2F7' },
+  container: { flex: 1, backgroundColor: '#F2F2F7', overflow: 'hidden' },
   map: { flex: 1 }
 });
 

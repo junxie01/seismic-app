@@ -16,7 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import SimpleMapComponent from '../components/SimpleMapComponent';
+import MapView, { Marker, Callout } from 'react-native-maps';
 
 // 忽略某些警告
 LogBox.ignoreLogs([
@@ -498,30 +498,52 @@ export default function EarthquakeMapScreen({ navigation }) {
       </View>
 
       {/* Map */}
-      <SimpleMapComponent
-        style={styles.map}
-        initialRegion={{
-          latitude: 0,
-          longitude: 0,
-          latitudeDelta: 180,
-          longitudeDelta: 360,
-        }}
-        earthquakes={earthquakeData}
-        onMarkerPress={(item) => {
-          try {
-            console.log('Navigation to EarthquakeDetail triggered');
-            // 检查navigation是否存在
-            if (navigation) {
-              navigation.navigate('EarthquakeDetail', { earthquake: item });
-            } else {
-              console.error('Navigation is not available');
-            }
-          } catch (navError) {
-            console.error('Navigation error:', navError);
-            Alert.alert('导航错误', '无法导航到详情页面');
-          }
-        }}
-      />
+      <View style={styles.map}>
+        <MapView
+          style={{ flex: 1 }}
+          initialRegion={{
+            latitude: 0,
+            longitude: 0,
+            latitudeDelta: 180,
+            longitudeDelta: 360,
+          }}
+          provider={Platform.OS === 'android' ? 'google' : undefined}
+        >
+          {earthquakeData.map((item, idx) => {
+            const coords = item.geometry?.coordinates;
+            const magnitude = item.properties?.magnitude || item.properties?.mag || 0;
+            if (!coords || coords.length < 2) return null;
+            const { size, color } = getMarkerStyle(magnitude);
+            return (
+              <Marker
+                key={idx}
+                coordinate={{ latitude: coords[1], longitude: coords[0] }}
+              >
+                <View style={{
+                  width: size,
+                  height: size,
+                  borderRadius: size / 2,
+                  backgroundColor: color,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  borderWidth: 2,
+                  borderColor: '#fff',
+                }}>
+                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{magnitude.toFixed(1)}</Text>
+                </View>
+                <Callout tooltip>
+                  <View style={{ padding: 10, backgroundColor: '#fff', borderRadius: 8, minWidth: 120 }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 14, marginBottom: 4 }}>震级: {magnitude.toFixed(1)}</Text>
+                    <Text style={{ fontSize: 12 }}>时间: {item.properties?.time ? new Date(item.properties.time).toLocaleString() : '未知'}</Text>
+                    <Text style={{ fontSize: 12 }}>地点: {item.properties?.place || '未知'}</Text>
+                    <Text style={{ fontSize: 12 }}>深度: {coords[2] ? `${coords[2]} km` : '未知'}</Text>
+                  </View>
+                </Callout>
+              </Marker>
+            );
+          })}
+        </MapView>
+      </View>
       
       {/* Error message */}
       {error && (
