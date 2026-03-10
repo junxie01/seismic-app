@@ -28,7 +28,23 @@
     },
     "plugins": [
       "expo-sqlite",
-      "expo-build-properties"
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "buildToolsVersion": "35.0.0",
+            "kotlinVersion": "2.1.20"
+          }
+        }
+      ],
+      [
+        "./withAMap.js",
+        {
+          "apiKey": "8eec5ac2087d95e6eeed7c64328f972a"
+        }
+      ]
     ]
   }
 }

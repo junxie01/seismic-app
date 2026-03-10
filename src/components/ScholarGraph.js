@@ -2,8 +2,7 @@ import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, PanResponder, TouchableOpacity, Dimensions } from 'react-native';
 import Svg, { Line, Circle, Text as SvgText, G, Image } from 'react-native-svg';
 
-// 获取屏幕尺寸
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
 
 // 定义关系类型和对应的颜色
 const relationshipColors = {
@@ -40,9 +39,18 @@ const ScholarGraph = ({ scholars, selectedScholarId, onEditScholar }) => {
   const [translateY, setTranslateY] = useState(0);
   const [selectedScholar, setSelectedScholar] = useState(null);
   const [nodePositions, setNodePositions] = useState([]);
+  const [screenWidth, setScreenWidth] = useState(375);
+  const [screenHeight, setScreenHeight] = useState(812);
   const lastScale = useRef(1);
   const lastTranslateX = useRef(0);
   const lastTranslateY = useRef(0);
+
+  // 获取屏幕尺寸
+  useEffect(() => {
+    const { width, height } = Dimensions.get('window');
+    setScreenWidth(width);
+    setScreenHeight(height);
+  }, []);
 
   // 计算节点位置 - 参考用户提供的图片，使用同心圆布局
   useEffect(() => {
@@ -82,10 +90,10 @@ const ScholarGraph = ({ scholars, selectedScholarId, onEditScholar }) => {
 
       // 定义图谱类型和对应的信息
       const graphTypes = [
-        { type: 'institution', label: '机构', value: centerScholar.affiliation, angleStart: -Math.PI/2 - Math.PI/4, angleEnd: -Math.PI/2 + Math.PI/4 },
-        { type: 'research', label: '研究方向', value: centerScholar.research, angleStart: -Math.PI/4, angleEnd: Math.PI/4 },
-        { type: 'papers', label: '论文', value: centerScholar.papers, angleStart: Math.PI/2 - Math.PI/4, angleEnd: Math.PI/2 + Math.PI/4 },
-        { type: 'impact', label: '影响', value: centerScholar.citations, angleStart: Math.PI - Math.PI/4, angleEnd: Math.PI + Math.PI/4 },
+        { type: 'institution', label: '机构', value: centerScholar.affiliation || '未知', angleStart: -Math.PI/2 - Math.PI/4, angleEnd: -Math.PI/2 + Math.PI/4 },
+        { type: 'research', label: '研究方向', value: centerScholar.research || '未知', angleStart: -Math.PI/4, angleEnd: Math.PI/4 },
+        { type: 'papers', label: '论文', value: centerScholar.papers || 0, angleStart: Math.PI/2 - Math.PI/4, angleEnd: Math.PI/2 + Math.PI/4 },
+        { type: 'impact', label: '影响', value: centerScholar.citations || 0, angleStart: Math.PI - Math.PI/4, angleEnd: Math.PI + Math.PI/4 },
         { type: 'relationship', label: '关系', value: centerScholar.advisor || '无', angleStart: -Math.PI/2 - Math.PI/2, angleEnd: -Math.PI/2 },
         { type: 'career', label: '事业', value: '成就', angleStart: Math.PI/2, angleEnd: Math.PI/2 + Math.PI/2 },
         { type: 'other', label: '其他', value: '信息', angleStart: -Math.PI/4 - Math.PI/2, angleEnd: -Math.PI/4 },
@@ -230,13 +238,15 @@ const ScholarGraph = ({ scholars, selectedScholarId, onEditScholar }) => {
 
           {/* 渲染节点 */}
           {nodePositions.map(({ x, y, scholar, type }, index) => {
+            if (!scholar) return null;
+            
             const isSelected = selectedScholar?.id === scholar.id;
             const nodeColor = getNodeColor(type, isSelected);
             
             return (
-              <G key={`node-${scholar.id}`}>
+              <G key={`node-${scholar.id || index}`}>
                 <Circle
-                  key={`circle-${scholar.id}`}
+                  key={`circle-${scholar.id || index}`}
                   cx={x}
                   cy={y}
                   r={type === 'central' ? "40" : "30"}
@@ -245,7 +255,7 @@ const ScholarGraph = ({ scholars, selectedScholarId, onEditScholar }) => {
                   strokeWidth="2"
                 />
                 <SvgText
-                  key={`text-${scholar.id}`}
+                  key={`text-${scholar.id || index}`}
                   x={x}
                   y={y}
                   fontSize={type === 'central' ? "12" : "8"}
@@ -254,11 +264,11 @@ const ScholarGraph = ({ scholars, selectedScholarId, onEditScholar }) => {
                   textAnchor="middle"
                   alignmentBaseline="middle"
                 >
-                  {scholar.name}
+                  {scholar.name || ''}
                 </SvgText>
                 {type !== 'central' && scholar.value && (
                   <SvgText
-                    key={`value-${scholar.id}`}
+                    key={`value-${scholar.id || index}`}
                     x={x}
                     y={y + 12}
                     fontSize="6"
@@ -277,29 +287,33 @@ const ScholarGraph = ({ scholars, selectedScholarId, onEditScholar }) => {
       </Svg>
       
       {/* 渲染可点击区域 */}
-      {nodePositions.map(({ x, y, scholar, type }, index) => (
-        <TouchableOpacity
-          key={`touchable-${scholar.id}`}
-          style={[
-            styles.nodeTouchable,
-            {
-              left: translateX + x * scale - (type === 'central' ? 40 : 30) * scale,
-              top: translateY + y * scale - (type === 'central' ? 40 : 30) * scale,
-              width: (type === 'central' ? 80 : 60) * scale,
-              height: (type === 'central' ? 80 : 60) * scale,
-              borderRadius: (type === 'central' ? 40 : 30) * scale,
-            }
-          ]}
-          onPress={() => setSelectedScholar(selectedScholar?.id === scholar.id ? null : scholar)}
-          activeOpacity={0.7}
-        />
-      ))}
+      {nodePositions.map(({ x, y, scholar, type }, index) => {
+        if (!scholar) return null;
+        
+        return (
+          <TouchableOpacity
+            key={`touchable-${scholar.id || index}`}
+            style={[
+              styles.nodeTouchable,
+              {
+                left: translateX + x * scale - (type === 'central' ? 40 : 30) * scale,
+                top: translateY + y * scale - (type === 'central' ? 40 : 30) * scale,
+                width: (type === 'central' ? 80 : 60) * scale,
+                height: (type === 'central' ? 80 : 60) * scale,
+                borderRadius: (type === 'central' ? 40 : 30) * scale,
+              }
+            ]}
+            onPress={() => setSelectedScholar(selectedScholar?.id === scholar.id ? null : scholar)}
+            activeOpacity={0.7}
+          />
+        );
+      })}
       
       {/* 显示详细信息 */}
       {selectedScholar && (
         <View style={styles.detailContainer}>
           <View style={styles.detailHeader}>
-            <Text style={styles.detailTitle}>{selectedScholar.name}</Text>
+            <Text style={styles.detailTitle}>{selectedScholar.name || ''}</Text>
             <View style={styles.detailActions}>
               <TouchableOpacity 
                 style={styles.closeButton} 
@@ -321,19 +335,19 @@ const ScholarGraph = ({ scholars, selectedScholarId, onEditScholar }) => {
             <>
               <View style={styles.detailItem}>
                 <Text style={styles.detailLabel}>研究方向:</Text>
-                <Text style={styles.detailValue}>{selectedScholar.research}</Text>
+                <Text style={styles.detailValue}>{selectedScholar.research || '未知'}</Text>
               </View>
               <View style={styles.detailItem}>
                 <Text style={styles.detailLabel}>所属机构:</Text>
-                <Text style={styles.detailValue}>{selectedScholar.affiliation}</Text>
+                <Text style={styles.detailValue}>{selectedScholar.affiliation || '未知'}</Text>
               </View>
               <View style={styles.detailItem}>
                 <Text style={styles.detailLabel}>论文数:</Text>
-                <Text style={styles.detailValue}>{selectedScholar.papers}</Text>
+                <Text style={styles.detailValue}>{selectedScholar.papers || 0}</Text>
               </View>
               <View style={styles.detailItem}>
                 <Text style={styles.detailLabel}>引用数:</Text>
-                <Text style={styles.detailValue}>{selectedScholar.citations}</Text>
+                <Text style={styles.detailValue}>{selectedScholar.citations || 0}</Text>
               </View>
               {selectedScholar.advisor && (
                 <View style={styles.detailItem}>
@@ -350,8 +364,8 @@ const ScholarGraph = ({ scholars, selectedScholarId, onEditScholar }) => {
             </>
           ) : (
             <View style={styles.detailItem}>
-              <Text style={styles.detailLabel}>{selectedScholar.name}:</Text>
-              <Text style={styles.detailValue}>{selectedScholar.value}</Text>
+              <Text style={styles.detailLabel}>{selectedScholar.name || ''}:</Text>
+              <Text style={styles.detailValue}>{selectedScholar.value || ''}</Text>
             </View>
           )}
         </View>

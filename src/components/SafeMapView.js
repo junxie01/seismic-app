@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 
 const styles = StyleSheet.create({
   map: {
@@ -22,9 +22,6 @@ const styles = StyleSheet.create({
   },
 });
 
-let MapView = null;
-let Marker = null;
-
 // 定义降级组件
 const FallbackMapView = ({ children, ...props }) => (
   <View style={[styles.map, props.style]}>
@@ -33,20 +30,6 @@ const FallbackMapView = ({ children, ...props }) => (
   </View>
 );
 
-// 初始化降级组件
-MapView = FallbackMapView;
-Marker = () => null;
-
-// 只有在非web平台上才尝试导入react-native-maps
-if (Platform.OS !== 'web') {
-  try {
-    const RNMaps = require('react-native-maps');
-    MapView = RNMaps.default;
-    Marker = RNMaps.Marker;
-  } catch (error) {
-    console.error('Error importing react-native-maps:', error);
-    // 保持降级组件
-  }
-}
-
-export { MapView, Marker };
+// 导出固定的降级组件
+export const MapView = FallbackMapView;
+export const Marker = () => null;

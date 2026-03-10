@@ -2,17 +2,17 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-// 动态导入react-native-maps
+// 动态导入react-native-amap3d
 let MapView, Marker;
 try {
-  console.log('Attempting to import react-native-maps...');
-  const RNMaps = require('react-native-maps');
-  console.log('react-native-maps imported successfully:', RNMaps);
-  MapView = RNMaps.default;
-  Marker = RNMaps.Marker;
+  console.log('Attempting to import react-native-amap3d...');
+  const RNAMap = require('react-native-amap3d');
+  console.log('react-native-amap3d imported successfully:', RNAMap);
+  MapView = RNAMap.MapView;
+  Marker = RNAMap.Marker;
   console.log('MapView and Marker assigned:', !!MapView, !!Marker);
 } catch (error) {
-  console.error('Error importing react-native-maps:', error);
+  console.error('Error importing react-native-amap3d:', error);
   MapView = null;
   Marker = null;
 }

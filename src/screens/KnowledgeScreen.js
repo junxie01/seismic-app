@@ -1,15 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Alert, Modal
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { initDatabase, getScholars, storeScholars } from '../utils/DatabaseManager';
 import { mockScholars } from '../constants/mockData';
 import ScholarGraph from '../components/ScholarGraph';
 
@@ -18,594 +12,175 @@ const KnowledgeScreen = () => {
   const [scholars, setScholars] = useState([]);
   const [showEditModal, setShowEditModal] = useState(false);
   const [currentScholar, setCurrentScholar] = useState(null);
-  const [expandedScholarId, setExpandedScholarId] = useState(null);
   const [selectedScholarId, setSelectedScholarId] = useState(null);
-  const [editForm, setEditForm] = useState({
-    name: '',
-    affiliation: '',
-    research: '',
-    bio: '',
-    papers: '',
-    citations: '',
-    advisor: '',
-    students: '',
-  });
   const [loading, setLoading] = useState(true);
 
-  // 从AsyncStorage加载学者数据
-  useEffect(() => {
-    const loadScholars = async () => {
-      try {
-        const storedScholars = await AsyncStorage.getItem('scholars');
-        if (storedScholars) {
-          setScholars(JSON.parse(storedScholars));
-        } else {
-          // 首次加载时使用默认数据
-          setScholars(mockScholars);
-          await AsyncStorage.setItem('scholars', JSON.stringify(mockScholars));
-        }
-      } catch (error) {
-        console.error('Error loading scholars:', error);
-        setScholars(mockScholars);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const [editForm, setEditForm] = useState({
+    name: '', affiliation: '', research: '', bio: '',
+    papers: '', citations: '', advisor: '', students: '',
+    influence: '', career: '', relationship: '', other: ''
+  });
 
-    loadScholars();
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      await initDatabase();
+      const data = await getScholars();
+      setScholars(data.length > 0 ? data : mockScholars);
+    } catch (e) { Alert.alert('错误', '无法加载数据'); }
+    finally { setLoading(false); }
   }, []);
 
-  // 保存学者数据到AsyncStorage
-  const saveScholarsToStorage = async (updatedScholars) => {
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const handleSaveEdit = async () => {
+    if (!editForm.name) { Alert.alert('提示', '姓名不能为空'); return; }
+    const updatedScholar = {
+      ...currentScholar,
+      ...editForm,
+      id: currentScholar?.id || Date.now().toString(),
+      papers: parseInt(editForm.papers) || 0,
+      citations: parseInt(editForm.citations) || 0,
+    };
+    const newScholars = currentScholar
+      ? scholars.map(s => s.id === currentScholar.id ? updatedScholar : s)
+      : [...scholars, updatedScholar];
     try {
-      await AsyncStorage.setItem('scholars', JSON.stringify(updatedScholars));
-    } catch (error) {
-      console.error('Error saving scholars:', error);
-    }
+      await storeScholars(newScholars);
+      setScholars(newScholars);
+      setShowEditModal(false);
+    } catch (e) { Alert.alert('保存失败'); }
   };
 
-  const handleEditPress = (scholar) => {
-    setCurrentScholar(scholar);
+  const openEdit = (s = null) => {
+    const scholarToEdit = s || scholars.find(sc => sc.id === selectedScholarId);
+    setCurrentScholar(scholarToEdit);
     setEditForm({
-      name: scholar.name,
-      affiliation: scholar.affiliation,
-      research: scholar.research,
-      bio: scholar.bio,
-      papers: scholar.papers.toString(),
-      citations: scholar.citations.toString(),
-      advisor: scholar.advisor || '',
-      students: scholar.students || '',
+      name: scholarToEdit?.name || '',
+      affiliation: scholarToEdit?.affiliation || '',
+      research: scholarToEdit?.research || '',
+      bio: scholarToEdit?.bio || '',
+      papers: scholarToEdit?.papers?.toString() || '0',
+      citations: scholarToEdit?.citations?.toString() || '0',
+      advisor: scholarToEdit?.advisor || '',
+      students: scholarToEdit?.students || '',
+      influence: scholarToEdit?.influence || '',
+      career: scholarToEdit?.career || '',
+      relationship: scholarToEdit?.relationship || '',
+      other: scholarToEdit?.other || ''
     });
     setShowEditModal(true);
   };
 
-  const handleDeletePress = (scholarId) => {
-    const updatedScholars = scholars.filter(scholar => scholar.id !== scholarId);
-    setScholars(updatedScholars);
-    saveScholarsToStorage(updatedScholars);
-  };
-
-  const handleAddScholar = () => {
-    const newScholar = {
-      id: scholars.length + 1,
-      name: '新学者',
-      affiliation: '未知机构',
-      research: '研究方向',
-      bio: '学者简介',
-      papers: 0,
-      citations: 0,
-      advisor: '',
-      students: '',
-    };
-    const updatedScholars = [...scholars, newScholar];
-    setScholars(updatedScholars);
-    saveScholarsToStorage(updatedScholars);
-    handleEditPress(newScholar);
-  };
-
-  const handleSaveEdit = () => {
-    if (currentScholar) {
-      const updatedScholars = scholars.map(scholar => 
-        scholar.id === currentScholar.id ? {
-          ...scholar,
-          ...editForm,
-          papers: parseInt(editForm.papers) || 0,
-          citations: parseInt(editForm.citations) || 0,
-        } : scholar
-      );
-      setScholars(updatedScholars);
-      saveScholarsToStorage(updatedScholars);
-    }
-    setShowEditModal(false);
-  };
-
-  const handleInputChange = (field, value) => {
-    setEditForm({
-      ...editForm,
-      [field]: value,
-    });
-  };
-
-  const handleScholarPress = (scholarId) => {
-    if (selectedScholarId === scholarId) {
-      setSelectedScholarId(null);
-    } else {
-      setSelectedScholarId(scholarId);
-      setExpandedScholarId(null);
-    }
-  };
+  const filteredScholars = scholars.filter(s =>
+    s.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <View style={styles.container}>
-      
-      <View style={styles.searchContainer}>
-        <Ionicons name="search-outline" size={20} color="#999" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="输入学者姓名进行搜索"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        <TouchableOpacity style={styles.addButton} onPress={handleAddScholar}>
-          <Ionicons name="add" size={24} color="#007AFF" />
+      <View style={styles.header}>
+        {/* 纠正：调整搜索框高度和边距，使其不显宽 */}
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={14} color="#666" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="查找学者"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholderTextColor="#999"
+          />
+        </View>
+        <TouchableOpacity style={styles.addBtn} onPress={() => openEdit()}>
+          <Ionicons name="add-circle" size={30} color="#007AFF" />
         </TouchableOpacity>
       </View>
 
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>加载学者数据...</Text>
-        </View>
-      ) : selectedScholarId ? (
-        <View style={styles.graphContainer}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => setSelectedScholarId(null)}
-          >
-            <Ionicons name="arrow-back" size={24} color="white" />
-            <Text style={styles.backButtonText}>返回列表</Text>
-          </TouchableOpacity>
-          <Text style={styles.graphTitle}>学者关系图谱</Text>
-          <ScholarGraph 
-            scholars={scholars} 
-            selectedScholarId={selectedScholarId}
-            onEditScholar={handleEditPress} 
-          />
-        </View>
-      ) : (
-        <ScrollView style={styles.scholarList}>
-          {/* 按姓氏拼音排序 */}
-          {[...scholars].sort((a, b) => {
-            // 确保使用中文排序
-            return new Intl.Collator('zh-CN').compare(a.name, b.name);
-          }).map((scholar) => (
-            <TouchableOpacity 
-              key={scholar.id} 
-              style={styles.scholarCard}
-              onPress={() => handleScholarPress(scholar.id)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.scholarHeader}>
-                <View style={styles.scholarInfo}>
-                  <Text style={styles.scholarName}>{scholar.name}</Text>
-                  <Text style={styles.scholarAffiliation}>{scholar.affiliation}</Text>
-                </View>
-                <View style={styles.scholarActions}>
-                  <TouchableOpacity 
-                    style={styles.scholarActionButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleEditPress(scholar);
-                    }}
-                  >
-                    <Ionicons name="create-outline" size={24} color="#007AFF" />
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.scholarActionButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleDeletePress(scholar.id);
-                    }}
-                  >
-                    <Ionicons name="trash-outline" size={24} color="#FF3B30" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
-
-      {showEditModal && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{currentScholar ? '编辑学者信息' : '添加学者'}</Text>
-              <TouchableOpacity onPress={() => setShowEditModal(false)}>
-                <Ionicons name="close" size={24} color="#999" />
+      {loading ? <ActivityIndicator size="large" style={{marginTop: 50}} /> :
+        selectedScholarId ? (
+          <View style={styles.graphView}>
+            <View style={styles.graphHeader}>
+              <TouchableOpacity style={styles.graphBtn} onPress={() => setSelectedScholarId(null)}>
+                <Ionicons name="arrow-back" size={18} color="#007AFF" /><Text style={styles.btnText}>返回列表</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.graphBtn} onPress={() => openEdit()}>
+                <Ionicons name="create-outline" size={18} color="#007AFF" /><Text style={styles.btnText}>编辑学者</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody}>
-              <View style={styles.formItem}>
-                <Text style={styles.formLabel}>姓名</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.name}
-                  onChangeText={(value) => handleInputChange('name', value)}
-                  placeholder="输入学者姓名"
-                />
-              </View>
-              <View style={styles.formItem}>
-                <Text style={styles.formLabel}>所属机构</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.affiliation}
-                  onChangeText={(value) => handleInputChange('affiliation', value)}
-                  placeholder="输入所属机构"
-                />
-              </View>
-              <View style={styles.formItem}>
-                <Text style={styles.formLabel}>研究方向</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.research}
-                  onChangeText={(value) => handleInputChange('research', value)}
-                  placeholder="输入研究方向"
-                />
-              </View>
-              <View style={styles.formItem}>
-                <Text style={styles.formLabel}>简介</Text>
-                <TextInput
-                  style={[styles.formInput, styles.formTextArea]}
-                  value={editForm.bio}
-                  onChangeText={(value) => handleInputChange('bio', value)}
-                  placeholder="输入学者简介"
-                  multiline
-                  numberOfLines={4}
-                />
-              </View>
-              <View style={styles.formItem}>
-                <Text style={styles.formLabel}>论文数量</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.papers}
-                  onChangeText={(value) => handleInputChange('papers', value)}
-                  placeholder="输入论文数量"
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={styles.formItem}>
-                <Text style={styles.formLabel}>引用次数</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.citations}
-                  onChangeText={(value) => handleInputChange('citations', value)}
-                  placeholder="输入引用次数"
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={styles.formItem}>
-                <Text style={styles.formLabel}>导师</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.advisor}
-                  onChangeText={(value) => handleInputChange('advisor', value)}
-                  placeholder="输入导师姓名"
-                />
-              </View>
-              <View style={styles.formItem}>
-                <Text style={styles.formLabel}>弟子</Text>
-                <TextInput
-                  style={[styles.formInput, styles.formTextArea]}
-                  value={editForm.students}
-                  onChangeText={(value) => handleInputChange('students', value)}
-                  placeholder="输入弟子姓名，多个用逗号分隔"
-                  multiline
-                  numberOfLines={3}
-                />
-              </View>
-              <TouchableOpacity style={styles.saveButton} onPress={handleSaveEdit}>
-                <Text style={styles.saveButtonText}>保存</Text>
-              </TouchableOpacity>
-            </ScrollView>
+            <ScholarGraph scholars={scholars} selectedScholarId={selectedScholarId} onEditScholar={openEdit} />
           </View>
+        ) : (
+          <ScrollView style={styles.list}>
+            {filteredScholars.map(s => (
+              <TouchableOpacity key={s.id} style={styles.card} onPress={() => setSelectedScholarId(s.id)}>
+                <View style={{flex:1}}>
+                  <Text style={styles.name}>{s.name}</Text>
+                  <Text style={styles.sub}>{s.affiliation} · {s.research}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#CCC" />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )
+      }
+
+      <Modal visible={showEditModal} animationType="slide">
+        {/* 纠正：增加头部 Padding 防止被刘海遮挡 */}
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{currentScholar ? '编辑学者' : '新增学者'}</Text>
+            <TouchableOpacity onPress={() => setShowEditModal(false)}>
+              <Text style={styles.cancelText}>取消</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.form}>
+            <Text style={styles.label}>基础信息</Text>
+            <TextInput style={styles.input} placeholder="姓名" value={editForm.name} onChangeText={t => setEditForm({...editForm, name: t})} />
+            <TextInput style={styles.input} placeholder="机构" value={editForm.affiliation} onChangeText={t => setEditForm({...editForm, affiliation: t})} />
+            <TextInput style={styles.input} placeholder="研究方向" value={editForm.research} onChangeText={t => setEditForm({...editForm, research: t})} />
+
+            <Text style={styles.label}>图谱核心维度</Text>
+            <TextInput style={styles.input} placeholder="师承 (Advisor)" value={editForm.advisor} onChangeText={t => setEditForm({...editForm, advisor: t})} />
+            <TextInput style={styles.input} placeholder="弟子 (Students)" value={editForm.students} onChangeText={t => setEditForm({...editForm, students: t})} />
+            <TextInput style={[styles.input, styles.area]} placeholder="影响 (Influence)" multiline value={editForm.influence} onChangeText={t => setEditForm({...editForm, influence: t})} />
+            <TextInput style={[styles.input, styles.area]} placeholder="事业 (Career)" multiline value={editForm.career} onChangeText={t => setEditForm({...editForm, career: t})} />
+            <TextInput style={[styles.input, styles.area]} placeholder="关系 (Relationship)" multiline value={editForm.relationship} onChangeText={t => setEditForm({...editForm, relationship: t})} />
+            <TextInput style={[styles.input, styles.area]} placeholder="其他 (Other)" multiline value={editForm.other} onChangeText={t => setEditForm({...editForm, other: t})} />
+            <TouchableOpacity style={styles.saveBtn} onPress={handleSaveEdit}><Text style={styles.saveBtnText}>保存信息</Text></TouchableOpacity>
+            <View style={{height: 40}} />
+          </ScrollView>
         </View>
-      )}
+      </Modal>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F2F2F7',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    textAlign: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    color: '#000',
-  },
-  viewToggle: {
-    flexDirection: 'row',
-    backgroundColor: '#F2F2F7',
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#E5E5EA',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    flexWrap: 'wrap',
-  },
-  viewButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: '#E5E5EA',
-    borderRadius: 10,
-    minWidth: 140,
-    marginRight: 12,
-    marginBottom: 8,
-  },
-  selectedViewButton: {
-    backgroundColor: '#007AFF',
-  },
-  viewButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#000',
-    marginLeft: 6,
-  },
-  selectedViewButtonText: {
-    color: 'white',
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 0.5,
-    borderTopColor: '#E5E5EA',
-  },
-  searchIcon: {
-    marginRight: 12,
-  },
-  searchInput: {
-    flex: 1,
-    height: 48,
-    backgroundColor: '#F2F2F7',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    fontSize: 15,
-  },
-  addButton: {
-    marginLeft: 12,
-    padding: 8,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#666',
-  },
-  graphContainer: {
-    flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  graphTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: 'white',
-    textAlign: 'center',
-    marginTop: 20,
-    marginBottom: 30,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    position: 'absolute',
-    top: 20,
-    left: 20,
-    zIndex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  backButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  scholarNetwork: {
-    flex: 1,
-    position: 'relative',
-  },
-  scholarNode: {
-    position: 'absolute',
-    alignItems: 'center',
-  },
-  scholarCircle: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: '#992683',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scholarCircleText: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: 'white',
-  },
-  scholarNodeName: {
-    color: 'white',
-    fontSize: 14,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  scholarList: {
-    flex: 1,
-  },
-  scholarCard: {
-    backgroundColor: 'white',
-    padding: 20,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#E5E5EA',
-  },
-  scholarHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  scholarInfo: {
-    flex: 1,
-  },
-  scholarName: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#000',
-    marginBottom: 6,
-  },
-  scholarAffiliation: {
-    fontSize: 15,
-    color: '#666',
-  },
-  scholarResearch: {
-    fontSize: 15,
-    color: '#FF3B30',
-    marginBottom: 16,
-  },
-  scholarActions: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  scholarActionButton: {
-    padding: 8,
-  },
-  scholarStats: {
-    flexDirection: 'row',
-    backgroundColor: '#F2F2F7',
-    borderRadius: 12,
-    padding: 12,
-    marginVertical: 12,
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#007AFF',
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-  },
-  scholarBio: {
-    fontSize: 15,
-    color: '#333',
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-  scholarDetails: {
-    paddingTop: 16,
-    borderTopWidth: 0.5,
-    borderTopColor: '#E5E5EA',
-  },
-  scholarDetail: {
-    fontSize: 15,
-    color: '#666',
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  scholarDetailsContainer: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 0.5,
-    borderTopColor: '#E5E5EA',
-  },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 20,
-    width: '90%',
-    maxHeight: '80%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#000',
-  },
-  modalBody: {
-    padding: 20,
-  },
-  formItem: {
-    marginBottom: 16,
-  },
-  formLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
-  },
-  formInput: {
-    backgroundColor: '#F2F2F7',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 15,
-    color: '#000',
-  },
-  formTextArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  saveButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 10,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-  },
+  container: { flex: 1, backgroundColor: '#F2F2F7' },
+  header: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FFF', alignItems: 'center', borderBottomWidth: 0.5, borderBottomColor: '#EEE' },
+  // 纠正：固定高度 36，内边距缩小，视觉对齐
+  searchBox: { width: 140, height: 36, flexDirection: 'row', backgroundColor: '#E5E5EA', borderRadius: 8, paddingHorizontal: 10, alignItems: 'center' },
+  searchInput: { flex: 1, marginLeft: 5, fontSize: 13, color: '#333', padding: 0 },
+  addBtn: { marginLeft: 'auto' },
+  list: { padding: 15 },
+  card: { backgroundColor: '#FFF', borderRadius: 10, padding: 15, marginBottom: 10, flexDirection: 'row', alignItems: 'center', elevation: 1 },
+  name: { fontSize: 15, fontWeight: 'bold' },
+  sub: { fontSize: 12, color: '#666', marginTop: 2 },
+  graphView: { flex: 1, backgroundColor: '#FFF' },
+  graphHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, borderBottomWidth: 0.5, borderBottomColor: '#EEE' },
+  graphBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F7FF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 },
+  btnText: { marginLeft: 5, color: '#007AFF', fontSize: 13, fontWeight: '600' },
+
+  modalContent: { flex: 1, backgroundColor: '#F8F8F8' },
+  // 纠正：添加 40px 的 paddingTop，解决按钮顶格无法点击的问题
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 15, paddingTop: 45, backgroundColor: '#FFF', borderBottomWidth: 0.5, borderBottomColor: '#DDD', alignItems: 'center' },
+  modalTitle: { fontSize: 17, fontWeight: 'bold' },
+  cancelText: { color: '#007AFF', fontSize: 15, fontWeight: '600' },
+  form: { padding: 20 },
+  label: { fontSize: 12, color: '#999', marginBottom: 8, marginTop: 10, fontWeight: 'bold' },
+  input: { backgroundColor: '#FFF', borderRadius: 8, padding: 12, marginBottom: 10, fontSize: 14, borderWidth: 0.5, borderColor: '#DDD' },
+  area: { height: 60, textAlignVertical: 'top' },
+  saveBtn: { backgroundColor: '#007AFF', borderRadius: 10, padding: 16, alignItems: 'center', marginTop: 15 },
+  saveBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
 });
 
 export default KnowledgeScreen;

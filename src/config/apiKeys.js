@@ -8,5 +8,9 @@ export const API_KEYS = {
   // 高德地图API配置
   amap: {
     apiKey: 'your_amap_api_key_here' // 请替换为实际的高德地图API key
+  },
+  // Google Maps API配置
+  googleMaps: {
+    apiKey: 'YOUR_GOOGLE_MAPS_API_KEY' // 请替换为实际的Google Maps API key
   }
 };

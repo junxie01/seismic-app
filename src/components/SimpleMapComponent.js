@@ -1,238 +1,114 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Platform, Animated } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React from 'react';
+import { View, StyleSheet, Platform } from 'react-native';
+import { WebView } from 'react-native-webview';
 
-// 尝试导入react-native-maps
-let MapView, Marker;
+const SimpleMapComponent = ({ style, earthquakes = [] }) => {
+  const mapData = earthquakes.map(e => {
+    try {
+      const place = e.properties.place || '未知位置';
+      const time = e.properties.time ? new Date(e.properties.time).toLocaleString() : '未知时间';
+      return {
+        lat: e.geometry.coordinates[1],
+        lng: e.geometry.coordinates[0],
+        mag: e.properties.mag || e.properties.magnitude || 0,
+        place: place.replace(/'/g, "\\'"),
+        time: time
+      };
+    } catch (err) {
+      console.error('Error mapping earthquake data:', err);
+      return {
+        lat: 0,
+        lng: 0,
+        mag: 0,
+        place: '数据错误',
+        time: '未知'
+      };
+    }
+  }).filter(item => !isNaN(item.lat) && !isNaN(item.lng));
 
-try {
-  console.log('Attempting to import react-native-maps...');
-  const RNMaps = require('react-native-maps');
-  console.log('react-native-maps imported successfully:', RNMaps);
-  
-  // 尝试不同的导出方式
-  MapView = RNMaps.default || RNMaps.MapView;
-  Marker = RNMaps.Marker;
-  
-  console.log('MapView and Marker assigned:', !!MapView, !!Marker);
-} catch (error) {
-  console.error('Error importing react-native-maps:', error);
-  MapView = null;
-  Marker = null;
-}
-
-// 辅助函数
-const getMagnitudeColor = (magnitude) => {
-  if (magnitude >= 6.0) return '#FF3B30';
-  if (magnitude >= 5.0) return '#FF9500';
-  return '#34C759';
-};
-
-// 简单地图组件
-const SimpleMapComponent = ({ 
-  style, 
-  initialRegion, 
-  earthquakes = [], 
-  onMarkerPress 
-}) => {
-  console.log('SimpleMapComponent props:', { style, initialRegion, earthquakesCount: earthquakes.length });
-  console.log('MapView and Marker availability:', !!MapView, !!Marker);
-  
-  // 创建动画值
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  
-  // 启动闪烁动画
-  useEffect(() => {
-    const pulse = Animated.sequence([
-      Animated.timing(pulseAnim, {
-        toValue: 1.5,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-      Animated.timing(pulseAnim, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-    ]);
-    
-    const loop = Animated.loop(pulse);
-    loop.start();
-    
-    return () => {
-      loop.stop();
-    };
-  }, [pulseAnim]);
-  
-  // 获取最新地震的时间
-  const getLatestEarthquakeTime = () => {
-    if (earthquakes.length === 0) return 0;
-    return Math.max(...earthquakes.map(e => e.properties.time || e.properties.timestamp || 0));
-  };
-  
-  // 判断是否是最新的地震
-  const isLatestEarthquake = (earthquake) => {
-    const latestTime = getLatestEarthquakeTime();
-    const earthquakeTime = earthquake.properties.time || earthquake.properties.timestamp || 0;
-    return earthquakeTime === latestTime;
-  };
-  
-  if (!MapView || !Marker) {
-    console.log('MapView or Marker not available, showing placeholder');
-    return (
-      <View style={[styles.mapPlaceholder, style]}>
-        <Ionicons name="earth-outline" size={80} color="#007AFF" />
-        <Text style={styles.mapPlaceholderText}>地震分布地图</Text>
-        <Text style={styles.mapPlaceholderSubtext}>当前平台不支持地图显示</Text>
-        <Text style={styles.mapPlaceholderSubtext}>平台: {Platform.OS}</Text>
-        {earthquakes.length > 0 && (
-          <View style={styles.earthquakeInfo}>
-            <Text style={styles.earthquakeCount}>已加载 {earthquakes.length} 条地震数据</Text>
-            <Text style={styles.earthquakeStats}>
-              最大震级: {Math.max(...earthquakes.map(e => e.properties.mag || e.properties.magnitude || 0))}
-            </Text>
-          </View>
-        )}
-      </View>
-    );
-  }
-
-  try {
-    // 转换初始区域
-    const mapInitialRegion = initialRegion ? {
-      latitude: initialRegion.latitude,
-      longitude: initialRegion.longitude,
-      latitudeDelta: initialRegion.latitudeDelta,
-      longitudeDelta: initialRegion.longitudeDelta,
-    } : {
-      latitude: 39.9042,
-      longitude: 116.4074,
-      latitudeDelta: 10,
-      longitudeDelta: 10,
-    };
-
-    console.log('Rendering simple map with', earthquakes.length, 'earthquakes');
-    console.log('MapView initial region:', mapInitialRegion);
-
-    return (
-      <View style={[styles.mapContainer, style]}>
-        <MapView
-          style={styles.map}
-          initialRegion={mapInitialRegion}
-          showsUserLocation={false}
-          showsMyLocationButton={false}
-          showsCompass={true}
-        >
-          {earthquakes.map((earthquake, index) => {
-            try {
-              const { geometry, properties } = earthquake;
-              const [longitude, latitude] = geometry.coordinates;
-              const magnitude = properties.mag || properties.magnitude || 0;
-              const color = getMagnitudeColor(magnitude);
-              const isLatest = isLatestEarthquake(earthquake);
-
-              return (
-                <Marker
-                  key={`earthquake-${index}`}
-                  coordinate={{ latitude, longitude }}
-                  onPress={() => onMarkerPress && onMarkerPress(earthquake)}
-                >
-                  {isLatest ? (
-                    <Animated.View style={[
-                      styles.markerContainer, 
-                      { 
-                        backgroundColor: color + '80',
-                        transform: [{ scale: pulseAnim }]
-                      }
-                    ]}>
-                      <View style={[styles.markerInner, { backgroundColor: color }]} />
-                    </Animated.View>
-                  ) : (
-                    <View style={[styles.markerContainer, { backgroundColor: color + '80' }]}>
-                      <View style={[styles.markerInner, { backgroundColor: color }]} />
-                    </View>
-                  )}
-                </Marker>
-              );
-            } catch (error) {
-              console.error('Marker error:', error);
-              return null;
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+      <link rel="stylesheet" href="https://lib.baomitu.com/leaflet/1.9.4/leaflet.css" />
+      <script src="https://lib.baomitu.com/leaflet/1.9.4/leaflet.js"></script>
+      <style>
+        body { margin: 0; padding: 0; background: #F2F2F7; }
+        #map { height: 100vh; width: 100vw; }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <script>
+        document.addEventListener('DOMContentLoaded', function() {
+          try {
+            const map = L.map('map', { 
+              zoomControl: true, 
+              attributionControl: false,
+              dragging: true,
+              touchZoom: true,
+              scrollWheelZoom: true
+            }).setView([20, 100], 3);
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+              maxZoom: 19
+            }).addTo(map);
+            
+            const data = ${JSON.stringify(mapData)};
+            if (data && data.length > 0) {
+              data.forEach(function(item) {
+                if (!isNaN(item.lat) && !isNaN(item.lng)) {
+                  const color = item.mag >= 6.0 ? '#FF3B30' : (item.mag >= 5.0 ? '#FF9500' : '#34C759');
+                  const marker = L.circleMarker([item.lat, item.lng], {
+                    color: color, 
+                    fillColor: color, 
+                    fillOpacity: 0.6, 
+                    weight: 1.5, 
+                    radius: Math.max(5, Math.min(20, item.mag * 2.5))
+                  }).bindPopup("<b>" + item.mag + " 级</b><br>" + item.place + "<br>" + item.time);
+                  marker.addTo(map);
+                }
+              });
             }
-          })}
-        </MapView>
-      </View>
-    );
-  } catch (error) {
-    console.error('Map component error:', error);
-    return (
-      <View style={[styles.mapPlaceholder, style]}>
-        <Ionicons name="earth-outline" size={80} color="#007AFF" />
-        <Text style={styles.mapPlaceholderText}>地图加载失败</Text>
-        <Text style={styles.mapPlaceholderSubtext}>{error.message}</Text>
-        <Text style={styles.mapPlaceholderSubtext}>平台: {Platform.OS}</Text>
-        {earthquakes.length > 0 && (
-          <Text style={styles.earthquakeCount}>已加载 {earthquakes.length} 条地震数据</Text>
-        )}
-      </View>
-    );
-  }
+          } catch (e) {
+            console.error('Map initialization error:', e);
+          }
+        }, false);
+      </script>
+    </body>
+    </html>
+  `;
+
+  return (
+    <View style={[styles.container, style]}>
+      <WebView
+        originWhitelist={['*']}
+        source={{ html: htmlContent }}
+        style={styles.map}
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
+        startInLoadingState={true}
+        scalesPageToFit={false}
+        scrollEnabled={true}
+        javaScriptEnabledAndroid={true}
+        mixedContentMode="always"
+        androidHardwareAccelerationDisabled={false}
+        onError={(syntheticEvent) => {
+          console.error('WebView error:', syntheticEvent.nativeEvent);
+        }}
+        onMessage={(event) => {
+          console.log('WebView message:', event.nativeEvent.data);
+        }}
+      />
+    </View>
+  );
 };
 
 const styles = StyleSheet.create({
-  mapContainer: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  map: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  mapPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F2F2F7',
-  },
-  mapPlaceholderText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
-  },
-  mapPlaceholderSubtext: {
-    marginTop: 8,
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-  earthquakeInfo: {
-    marginTop: 16,
-    alignItems: 'center',
-  },
-  earthquakeCount: {
-    fontSize: 14,
-    color: '#999',
-    marginBottom: 4,
-  },
-  earthquakeStats: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  markerContainer: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  markerInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
+  container: { flex: 1, backgroundColor: '#F2F2F7' },
+  map: { flex: 1 }
 });
 
 export default SimpleMapComponent;

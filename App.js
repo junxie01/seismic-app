@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import KnowledgeScreen from './src/screens/KnowledgeScreen';
 const Tab = createBottomTabNavigator();
 
 const App = () => {
+
   return (
     <NavigationContainer>
       <Tab.Navigator
