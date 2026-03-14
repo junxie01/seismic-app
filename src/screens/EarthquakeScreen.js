@@ -1,334 +1,286 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ActivityIndicator,
-  Linking,
-  ScrollView,
-} from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useState, useRef } from 'react';
+import { StyleSheet, View, SafeAreaView, TouchableOpacity, ScrollView } from 'react-native';
+import { WebView } from 'react-native-webview';
+import { Portal, Modal, Text, Card, ActivityIndicator, IconButton, Provider as PaperProvider } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
-import SimpleMapComponent from '../components/SimpleMapComponent';
-import { initDatabase, storeEarthquakes, getEarthquakes, hasEarthquakeData } from '../utils/DatabaseManager';
+import axios from 'axios';
+import { wgs84togcj02 } from '../utils/coords';
+import { getLeafletHtml } from '../utils/mapHtml';
 
-// 辅助函数
-const getMagnitudeColor = (magnitude) => {
-  if (magnitude >= 6.0) return '#FF3B30';
-  if (magnitude >= 5.0) return '#FF9500';
-  return '#34C759';
-};
-
-// 固定屏幕尺寸值
-const screenWidth = 375;
-const screenHeight = 667;
+const USGS_BASE_URL = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson';
 
 const EarthquakeScreen = () => {
-  const [timeRange, setTimeRange] = useState(7);
-  const [minMagnitude, setMinMagnitude] = useState(4.0);
-  const [showTimeRangeDropdown, setShowTimeRangeDropdown] = useState(false);
-  const [showMagnitudeDropdown, setShowMagnitudeDropdown] = useState(false);
+  const webViewRef = useRef(null);
+  const [loading, setLoading] = useState(false);
+  const [selectedEq, setSelectedEq] = useState(null);
+  const [timeRange, setTimeRange] = useState('7');
+  const [minMag, setMinMag] = useState('4');
+  const [showTimeDropdown, setShowTimeDropdown] = useState(false);
+  const [showMagDropdown, setShowMagDropdown] = useState(false);
   const [earthquakes, setEarthquakes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [selectedEarthquake, setSelectedEarthquake] = useState(null);
-  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(null);
   const [showSummary, setShowSummary] = useState(true);
+  const [mapReady, setMapReady] = useState(false);
 
-  // 使用useCallback避免每次渲染都创建新的函数
-  const fetchEarthquakeData = useCallback(async () => {
+  const fetchAndShowData = async () => {
     setLoading(true);
-    setError(null);
     try {
-      // 初始化数据库
-      await initDatabase();
+      const now = new Date();
+      const startTime = new Date(now.getTime() - parseInt(timeRange) * 24 * 60 * 60 * 1000).toISOString();
+      const url = `${USGS_BASE_URL}&starttime=${startTime}&minmagnitude=${minMag}`;
       
-      // 尝试从API获取新数据
-      try {
-        const endTime = new Date();
-        const startTime = new Date();
-        startTime.setDate(startTime.getDate() - timeRange);
+      const response = await axios.get(url);
+      const features = response.data.features || [];
 
-        const startStr = startTime.toISOString();
-        const endStr = endTime.toISOString();
+      const transformedFeatures = features.map((f) => {
+        const [lng, lat] = f.geometry.coordinates;
+        const [nlng, nlat] = wgs84togcj02(lng, lat);
+        return {
+          ...f,
+          geometry: {
+            ...f.geometry,
+            coordinates: [nlng, nlat, f.geometry.coordinates[2]]
+          }
+        };
+      });
 
-        const url = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=${startStr}&endtime=${endStr}&minmagnitude=${minMagnitude}&limit=20000`;
-        console.log('Fetching earthquake data from USGS API:', url);
+      setEarthquakes(transformedFeatures);
+      setLastUpdate(now);
 
-        const response = await fetch(url);
-        console.log('USGS API response status:', response.status);
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('USGS API error response:', errorText);
-          throw new Error(`Failed to fetch earthquake data: ${response.status} ${errorText}`);
-        }
-        const apiData = await response.json();
-        console.log('USGS API response data:', apiData);
-        const features = apiData.features || [];
-        console.log('USGS API features count:', features.length);
-        
-        // 存储数据到数据库
-        if (features.length > 0) {
-          await storeEarthquakes(features);
-        }
-        
-        setEarthquakes(features);
-      } catch (apiError) {
-        console.error('Error fetching from API, trying to load from database:', apiError);
-        
-        // 检查数据库中是否有数据
-        const hasData = await hasEarthquakeData();
-        if (hasData) {
-          // 从数据库加载数据
-          const storedEarthquakes = await getEarthquakes();
-          console.log('Loaded earthquakes from database:', storedEarthquakes.length);
-          setEarthquakes(storedEarthquakes);
-          setError('网络连接失败，显示本地缓存数据');
-        } else {
-          throw apiError;
-        }
-      }
-    } catch (err) {
-      setError('获取地震数据失败，请检查网络连接');
-      console.error('Error fetching earthquake data:', err);
+    } catch (error) {
+      console.error('Fetch USGS error:', error);
     } finally {
       setLoading(false);
     }
-  }, [timeRange, minMagnitude]);
+  };
 
   useEffect(() => {
-    fetchEarthquakeData();
-  }, [fetchEarthquakeData]);
+    const timer = setTimeout(() => {
+        fetchAndShowData();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [timeRange, minMag]);
 
-  // 使用useCallback避免每次渲染都创建新的函数
-  const handleEarthquakePress = useCallback((feature) => {
-    setSelectedEarthquake(feature);
-    setShowDetailModal(true);
-  }, []);
+  useEffect(() => {
+    if (mapReady && earthquakes.length > 0) {
+      console.log('Sending earthquakes to map:', earthquakes.length);
+      webViewRef.current?.postMessage(JSON.stringify({
+        type: 'render_earthquakes',
+        data: earthquakes
+      }));
+    }
+  }, [mapReady, earthquakes]);
 
-  // 使用useCallback避免每次渲染都创建新的函数
-  const handleTimeRangeChange = useCallback((days) => {
-    setTimeRange(days);
-    setShowTimeRangeDropdown(false);
-    setShowSummary(true);
-  }, []);
+  const onMessage = (event) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      console.log('Received from WebView:', data.type);
+      if (data.type === 'SELECT_EVENT') {
+        setSelectedEq(data.payload);
+      } else if (data.type === 'MAP_READY') {
+        console.log('Map is ready');
+        setMapReady(true);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
-  // 使用useCallback避免每次渲染都创建新的函数
-  const handleMagnitudeChange = useCallback((magnitude) => {
-    setMinMagnitude(magnitude);
-    setShowMagnitudeDropdown(false);
-    setShowSummary(true);
-  }, []);
+  const getMagnitudeColor = (magnitude) => {
+    if (magnitude >= 6.0) return '#FF3B30';
+    if (magnitude >= 5.0) return '#FF9500';
+    return '#34C759';
+  };
+
+  const countByMagnitude = () => {
+    const counts = { great: 0, major: 0, moderate: 0 };
+    earthquakes.forEach(eq => {
+      const mag = eq.properties?.mag || 0;
+      if (mag >= 6.0) counts.great++;
+      else if (mag >= 5.0) counts.major++;
+      else counts.moderate++;
+    });
+    return counts;
+  };
+
+  const counts = countByMagnitude();
+  const maxMag = earthquakes.length > 0 
+    ? Math.max(...earthquakes.map(eq => eq.properties?.mag || 0)) 
+    : 0;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.filterContainer}>
-        <View style={styles.dropdownContainer}>
-          <View style={styles.dropdownWrapper}>
-            <TouchableOpacity
-              style={styles.dropdownButton}
-              onPress={() => setShowTimeRangeDropdown(!showTimeRangeDropdown)}
-            >
-              <Text style={styles.dropdownLabel}>时间范围:</Text>
-              <Text style={styles.dropdownValue}>{timeRange}天</Text>
-              <Ionicons name={showTimeRangeDropdown ? 'chevron-up' : 'chevron-down'} size={16} color="#007AFF" />
-            </TouchableOpacity>
-            {showTimeRangeDropdown && (
-              <View style={styles.dropdownMenu}>
-                {[1, 3, 7, 14, 30].map((days) => (
-                  <TouchableOpacity
-                    key={days}
-                    style={styles.dropdownMenuItem}
-                    onPress={() => handleTimeRangeChange(days)}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>{days}天</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-          
-          <View style={styles.dropdownWrapper}>
-            <TouchableOpacity
-              style={styles.dropdownButton}
-              onPress={() => setShowMagnitudeDropdown(!showMagnitudeDropdown)}
-            >
-              <Text style={styles.dropdownLabel}>最小震级:</Text>
-              <Text style={styles.dropdownValue}>{minMagnitude}</Text>
-              <Ionicons name={showMagnitudeDropdown ? 'chevron-up' : 'chevron-down'} size={16} color="#007AFF" />
-            </TouchableOpacity>
-            {showMagnitudeDropdown && (
-              <View style={styles.dropdownMenu}>
-                {[3.0, 4.0, 5.0, 6.0].map((magnitude) => (
-                  <TouchableOpacity
-                    key={magnitude}
-                    style={styles.dropdownMenuItem}
-                    onPress={() => handleMagnitudeChange(magnitude)}
-                  >
-                    <Text style={styles.dropdownMenuItemText}>{magnitude}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
+    <PaperProvider>
+      <View style={styles.container}>
+        <View style={styles.filterContainer}>
+          <View style={styles.dropdownContainer}>
+            <View style={styles.dropdownWrapper}>
+              <TouchableOpacity
+                style={styles.dropdownButton}
+                onPress={() => {
+                  setShowTimeDropdown(!showTimeDropdown);
+                  setShowMagDropdown(false);
+                }}
+              >
+                <Text style={styles.dropdownLabel}>时间范围:</Text>
+                <Text style={styles.dropdownValue}>{timeRange}天</Text>
+                <Ionicons name={showTimeDropdown ? 'chevron-up' : 'chevron-down'} size={16} color="#007AFF" />
+              </TouchableOpacity>
+              {showTimeDropdown && (
+                <View style={styles.dropdownMenu}>
+                  {[1, 7, 30].map((days) => (
+                    <TouchableOpacity
+                      key={days}
+                      style={styles.dropdownMenuItem}
+                      onPress={() => {
+                        setTimeRange(String(days));
+                        setShowTimeDropdown(false);
+                      }}
+                    >
+                      <Text style={styles.dropdownMenuItemText}>{days}天</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+            
+            <View style={styles.dropdownWrapper}>
+              <TouchableOpacity
+                style={styles.dropdownButton}
+                onPress={() => {
+                  setShowMagDropdown(!showMagDropdown);
+                  setShowTimeDropdown(false);
+                }}
+              >
+                <Text style={styles.dropdownLabel}>最小震级:</Text>
+                <Text style={styles.dropdownValue}>{minMag}</Text>
+                <Ionicons name={showMagDropdown ? 'chevron-up' : 'chevron-down'} size={16} color="#007AFF" />
+              </TouchableOpacity>
+              {showMagDropdown && (
+                <View style={styles.dropdownMenu}>
+                  {[3, 4, 5].map((magnitude) => (
+                    <TouchableOpacity
+                      key={magnitude}
+                      style={styles.dropdownMenuItem}
+                      onPress={() => {
+                        setMinMag(String(magnitude));
+                        setShowMagDropdown(false);
+                      }}
+                    >
+                      <Text style={styles.dropdownMenuItemText}>{magnitude}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
           </View>
         </View>
-      </View>
 
-      <View style={styles.mapContainer}>
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>加载地震数据中...</Text>
+        <WebView
+          key={earthquakes.length}
+          cacheEnabled={false}
+          allowFileAccess={true}
+          allowUniversalAccessFromFileURLs={true}
+          ref={webViewRef}
+          originWhitelist={['*']}
+          source={{ html: getLeafletHtml(earthquakes) }}
+          style={styles.map}
+          onMessage={onMessage}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+        />
+
+        {loading && (
+          <View style={styles.loader}>
+            <ActivityIndicator animating={true} color="#2C3E50" size="large" />
           </View>
-        ) : error ? (
-          <View style={styles.errorContainer}>
-            <Ionicons name="alert-circle-outline" size={64} color="#FF3B30" />
-            <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={fetchEarthquakeData}>
-              <Text style={styles.retryButtonText}>重试</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <SimpleMapComponent 
-            earthquakes={earthquakes} 
-            onMarkerPress={handleEarthquakePress} 
-            initialRegion={{ 
-              latitude: 45, 
-              longitude: 85, 
-              latitudeDelta: 50, 
-              longitudeDelta: 90 
-            }} 
-          />
         )}
 
         {showSummary && (
           <View style={styles.summaryContainer}>
             <View style={styles.summaryHeader}>
-              <Text style={styles.summaryTitle}>地震数据摘要</Text>
-              <TouchableOpacity onPress={() => setShowSummary(false)}>
-                <Ionicons name="close" size={20} color="#999" />
+              <Text style={styles.summaryTitle}>地震分布</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowSummary(false)}
+              >
+                <Ionicons name="close" size={22} color="#666" />
               </TouchableOpacity>
             </View>
             <View style={styles.summaryContent}>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>时间范围:</Text>
-                <Text style={styles.summaryValue}>{timeRange}天</Text>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>地震数据数量:</Text>
+                <Text style={styles.summaryValue}>{earthquakes.length}</Text>
+                <View style={[styles.colorDot, { backgroundColor: '#FF3B30' }]} />
+                <Text style={styles.legendText}>6.0+</Text>
+                <View style={[styles.colorDot, { backgroundColor: '#FF9500' }]} />
+                <Text style={styles.legendText}>5.0-5.9</Text>
+                <View style={[styles.colorDot, { backgroundColor: '#34C759' }]} />
+                <Text style={styles.legendText}>4.0-4.9</Text>
               </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>最小震级:</Text>
-                <Text style={styles.summaryValue}>{minMagnitude}</Text>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>地震:</Text>
+                <Text style={styles.summaryValue}>{earthquakes.length} 个</Text>
               </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>地震数量:</Text>
-                <Text style={styles.summaryValue}>{earthquakes.length} 条</Text>
+              <View style={styles.summaryFooter}>
+                <Text style={styles.footerText}>数据来源: USGS (过去{timeRange}天 M≥{minMag})</Text>
+                {lastUpdate && (
+                  <Text style={styles.footerText}>最后更新: {lastUpdate.toLocaleString()}</Text>
+                )}
               </View>
-              {earthquakes.length > 0 && (
-                <View style={styles.summaryItem}>
-                  <Text style={styles.summaryLabel}>最大震级:</Text>
-                  <Text style={[styles.summaryValue, { color: getMagnitudeColor(Math.max(...earthquakes.map(e => e.properties.mag || e.properties.magnitude || 0)))}]}>
-                    {Math.max(...earthquakes.map(e => e.properties.mag || e.properties.magnitude || 0))}
-                  </Text>
-                </View>
-              )}
             </View>
           </View>
         )}
-      </View>
 
-      {showDetailModal && selectedEarthquake && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>地震详细信息</Text>
-              <TouchableOpacity onPress={() => setShowDetailModal(false)}>
-                <Ionicons name="close" size={24} color="#999" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalBody}>
-              {(() => {
-                const { properties, geometry } = selectedEarthquake;
-                const { mag, place, time, url, felt, cdi, mmi, alert, status, tsunami, sig, net, code, nst, dmin, rms, gap, magType, type } = properties;
-                const [longitude, latitude, depthValue] = geometry.coordinates;
-                
-                return (
-                  <>
-                    <View style={styles.detailItem}>
-                      <Text style={styles.detailLabel}>震级:</Text>
-                      <Text style={[styles.detailValue, { color: getMagnitudeColor(mag) }]}>{mag}</Text>
-                    </View>
-                    <View style={styles.detailItem}>
-                      <Text style={styles.detailLabel}>位置:</Text>
-                      <Text style={styles.detailValue}>{place}</Text>
-                    </View>
-                    <View style={styles.detailItem}>
-                      <Text style={styles.detailLabel}>时间:</Text>
-                      <Text style={styles.detailValue}>{new Date(time).toLocaleString()}</Text>
-                    </View>
-                    <View style={styles.detailItem}>
-                      <Text style={styles.detailLabel}>深度:</Text>
-                      <Text style={styles.detailValue}>{depthValue.toFixed(1)} km</Text>
-                    </View>
-                    <View style={styles.detailItem}>
-                      <Text style={styles.detailLabel}>坐标:</Text>
-                      <Text style={styles.detailValue}>经度: {longitude.toFixed(4)}, 纬度: {latitude.toFixed(4)}</Text>
-                    </View>
-                    {felt && (
-                      <View style={styles.detailItem}>
-                        <Text style={styles.detailLabel}>有感人数:</Text>
-                        <Text style={styles.detailValue}>{felt} 人</Text>
-                      </View>
-                    )}
-                    {alert && (
-                      <View style={styles.detailItem}>
-                        <Text style={styles.detailLabel}>预警级别:</Text>
-                        <Text style={styles.detailValue}>{alert}</Text>
-                      </View>
-                    )}
-                    <View style={styles.detailItem}>
-                      <Text style={styles.detailLabel}>状态:</Text>
-                      <Text style={styles.detailValue}>{status}</Text>
-                    </View>
-                    <View style={styles.detailItem}>
-                      <Text style={styles.detailLabel}>海啸:</Text>
-                      <Text style={styles.detailValue}>{tsunami ? '是' : '否'}</Text>
-                    </View>
-                    {url && (
-                      <TouchableOpacity style={styles.urlButton} onPress={() => Linking.openURL(url)}>
-                        <Ionicons name="open-outline" size={16} color="#007AFF" />
-                        <Text style={styles.urlButtonText}>查看USGS详细信息</Text>
-                      </TouchableOpacity>
-                    )}
-                  </>
-                );
-              })()}
-            </ScrollView>
-          </View>
-        </View>
-      )}
-    </View>
+        {!showSummary && (
+          <TouchableOpacity
+            style={styles.showSummaryButton}
+            onPress={() => setShowSummary(true)}
+          >
+            <Ionicons name="information-circle-outline" size={24} color="#007AFF" />
+          </TouchableOpacity>
+        )}
+
+        <Portal>
+          <Modal
+            visible={!!selectedEq}
+            onDismiss={() => setSelectedEq(null)}
+            contentContainerStyle={styles.detailModal}
+          >
+            {selectedEq && (
+              <Card style={styles.card}>
+                <Card.Title
+                  title={`M ${selectedEq.properties.mag} - ${selectedEq.properties.place}`}
+                  subtitle={new Date(selectedEq.properties.time).toLocaleString()}
+                  right={(props) => <IconButton {...props} icon="close" onPress={() => setSelectedEq(null)} />}
+                />
+                <Card.Content>
+                  <View style={styles.detailRow}>
+                    <Text variant="bodyMedium" style={styles.detailLabel}>深度:</Text>
+                    <Text variant="bodyLarge">{selectedEq.geometry.coordinates[2]} km</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text variant="bodyMedium" style={styles.detailLabel}>状态:</Text>
+                    <Text variant="bodyLarge">{selectedEq.properties.status}</Text>
+                  </View>
+                </Card.Content>
+              </Card>
+            )}
+          </Modal>
+        </Portal>
+      </View>
+    </PaperProvider>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F2F2F7',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    textAlign: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    color: '#000',
-  },
+  container: { flex: 1, backgroundColor: '#F2F2F7' },
   filterContainer: {
     backgroundColor: '#F2F2F7',
     borderBottomWidth: 0.5,
     borderBottomColor: '#E5E5EA',
     paddingVertical: 12,
     paddingHorizontal: 16,
+    zIndex: 1000,
   },
   dropdownContainer: {
     flexDirection: 'row',
@@ -338,6 +290,7 @@ const styles = StyleSheet.create({
   dropdownWrapper: {
     position: 'relative',
     marginRight: 12,
+    zIndex: 1001,
   },
   dropdownButton: {
     flexDirection: 'row',
@@ -371,8 +324,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 5,
-    zIndex: 10,
+    elevation: 20,
+    zIndex: 1002,
   },
   dropdownMenuItem: {
     paddingVertical: 12,
@@ -384,186 +337,20 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#000',
   },
-  mapContainer: {
-    flex: 1,
-    backgroundColor: '#E5E5EA',
+  map: { flex: 1, zIndex: 1 },
+  loader: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  map: {
-    flex: 1,
-  },
-  mapPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F2F2F7',
-  },
-  mapPlaceholderText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
-  },
-  earthquakeCount: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 8,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#666',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  retryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: '#007AFF',
-    borderRadius: 10,
-  },
-  retryButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-  },
-  earthquakeList: {
-    flex: 1,
-    padding: 16,
-  },
-  earthquakeCard: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  magnitudeContainer: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: '#F8F8F8',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  magnitudeText: {
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  earthquakeInfo: {
-    flex: 1,
-  },
-  locationText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#000',
-    marginBottom: 6,
-  },
-  timeText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 3,
-  },
-  depthText: {
-    fontSize: 13,
-    color: '#999',
-  },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 20,
-    width: '90%',
-    maxHeight: '80%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#000',
-  },
-  modalBody: {
-    padding: 20,
-  },
-  detailItem: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  detailLabel: {
-    width: 80,
-    fontSize: 16,
-    color: '#666',
-  },
-  detailValue: {
-    flex: 1,
-    fontSize: 16,
-    color: '#000',
-    fontWeight: '500',
-  },
-  urlButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    backgroundColor: '#F0F7FF',
-    borderRadius: 10,
-    marginTop: 20,
-    alignItems: 'center',
-  },
-  urlButtonText: {
-    fontSize: 16,
-    color: '#007AFF',
-    fontWeight: '600',
+    zIndex: 10
   },
   summaryContainer: {
     position: 'absolute',
     bottom: 20,
     left: 20,
     right: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 16,
     padding: 16,
     shadowColor: '#000',
@@ -571,35 +358,90 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 6,
+    zIndex: 50,
   },
   summaryHeader: {
+    marginBottom: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
   },
   summaryTitle: {
     fontSize: 17,
     fontWeight: '600',
     color: '#000',
   },
+  closeButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   summaryContent: {
     gap: 8,
   },
-  summaryItem: {
+  summaryRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
   summaryLabel: {
     fontSize: 15,
     color: '#666',
+    marginRight: 8,
   },
   summaryValue: {
     fontSize: 15,
     fontWeight: '600',
     color: '#000',
+    marginRight: 12,
   },
+  colorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 4,
+  },
+  legendText: {
+    fontSize: 13,
+    color: '#666',
+    marginRight: 8,
+  },
+  summaryFooter: {
+    marginTop: 8,
+    gap: 4,
+  },
+  footerText: {
+    fontSize: 13,
+    color: '#888',
+    textAlign: 'center',
+  },
+  showSummaryButton: {
+    position: 'absolute',
+    bottom: 30,
+    right: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 6,
+    zIndex: 51,
+  },
+  detailModal: {
+    padding: 0,
+    margin: 20,
+    justifyContent: 'flex-end',
+    marginBottom: 80
+  },
+  card: { borderRadius: 12, elevation: 4 },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  detailLabel: { color: '#888' }
 });
 
 export default EarthquakeScreen;

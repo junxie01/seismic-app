@@ -44,10 +44,10 @@ const JournalScreen = () => {
           const fetchedPapers = result.value.message.items.map((item, pIndex) => ({
             id: `${journalId}-${pIndex}`,
             journalId: journalId,
-            title: item.title?.[0] || 'Untitled',
-            authors: item.author?.map(a => `${a.given || ''} ${a.family || ''}`.trim()).join(', ') || 'Unknown',
+            title: (item.title?.[0] || 'Untitled').replace(/&gt;/g, '').replace(/>/g, ''),
+            authors: (item.author?.map(a => `${a.given || ''} ${a.family || ''}`.trim()).join(', ') || 'Unknown').replace(/&gt;/g, '').replace(/>/g, ''),
             date: item.published?.['date-parts']?.[0]?.join('-') || 'N/A',
-            abstract: (item.abstract || '暂无摘要').replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'),
+            abstract: (item.abstract || '暂无摘要').replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '').replace(/>/g, '').replace(/&amp;/g, '&'),
             url: item.URL || `https://doi.org/${item.DOI}`,
             doi: item.DOI || 'N/A',
             citations: item['is-referenced-by-count'] || 0,
@@ -78,8 +78,14 @@ const JournalScreen = () => {
       await initDatabase();
       const stored = await getJournalData();
       if (stored.papers.length > 0) {
+        const cleanedPapers = stored.papers.map(p => ({
+        ...p,
+        title: (p.title || 'Untitled').replace(/&gt;/g, '').replace(/>/g, ''),
+        authors: (p.authors || 'Unknown').replace(/&gt;/g, '').replace(/>/g, ''),
+        abstract: (p.abstract || '暂无摘要').replace(/&gt;/g, '').replace(/>/g, '')
+      }));
         setJournals(stored.journals);
-        setPapers(stored.papers);
+        setPapers(cleanedPapers);
       }
       // 无论如何都去同步一次
       syncJournals();

@@ -64,6 +64,6 @@ npx expo run:android --variant release
 - **网络**: 首次运行需要网络连接以同步地震和论文数据。
 
 ## 应用截图
-![地震分布](picture/2026-02-26%20110323.png)
-![期刊论文](picture/2026-02-26%20110323(1).png)
-![学者信息](picture/2026-02-26%20110323(2).png)
+![地震分布](picture/2.png)
+![期刊论文](picture/3.png)
+![学者信息](picture/4.png)

@@ -11,23 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-// 动态导入react-native-amap3d
-let MapView, Marker;
-
-try {
-  console.log('Attempting to import react-native-amap3d in StationMapScreen...');
-  const RNAMap = require('react-native-amap3d');
-  console.log('react-native-amap3d imported successfully:', RNAMap);
-  
-  MapView = RNAMap.MapView;
-  Marker = RNAMap.Marker;
-  
-  console.log('MapView and Marker assigned:', !!MapView, !!Marker);
-} catch (error) {
-  console.error('Error importing react-native-amap3d:', error);
-  MapView = null;
-  Marker = null;
-}
+import { MapView, Marker } from '../components/MapView';
 
 // Mock station data for testing
 const mockStations = [
